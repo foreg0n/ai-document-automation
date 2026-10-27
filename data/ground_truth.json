@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "synthetic": true,
+  "document_type": "invoice",
+  "normalization": {
+    "invoice_date": "YYYY-MM-DD",
+    "total_amount": "Decimal string with two places; null when absent",
+    "currency": "Three-letter uppercase currency code",
+    "missing_values": "JSON null; never guess"
+  },
+  "cases": [
+    {
+      "file": "01_invoice_pln.pdf",
+      "scenario": "valid",
+      "sha256": "8125080e9a393b976e1cb5c674ca1affeb341e42036bcfccc5647eac82888355",
+      "expected_fields": {
+        "supplier": "Northstar Office Demo",
+        "invoice_number": "DEMO-2026-001",
+        "invoice_date": "2026-10-20",
+        "total_amount": "1234.50",
+        "currency": "PLN"
+      },
+      "expected_missing_fields": [],
+      "duplicate_of": null
+    },
+    {
+      "file": "02_invoice_eur.pdf",
+      "scenario": "valid",
+      "sha256": "c14b41bae16a19446b2b23829fb141f36777c5a509b4d9cdf8a9be69944c07ab",
+      "expected_fields": {
+        "supplier": "Blue Harbor Studio Demo",
+        "invoice_number": "DEMO-2026-002",
+        "invoice_date": "2026-10-21",
+        "total_amount": "980.00",
+        "currency": "EUR"
+      },
+      "expected_missing_fields": [],
+      "duplicate_of": null
+    },
+    {
+      "file": "03_invoice_usd.pdf",
+      "scenario": "valid",
+      "sha256": "35d7dd7b907fe1047725be1156a9ff670710fda255c024e1a1acaaf7997860c7",
+      "expected_fields": {
+        "supplier": "Cedar Cloud Services Demo",
+        "invoice_number": "DEMO-2026-003",
+        "invoice_date": "2026-10-22",
+        "total_amount": "2750.00",
+        "currency": "USD"
+      },
+      "expected_missing_fields": [],
+      "duplicate_of": null
+    },
+    {
+      "file": "04_invoice_missing_total.pdf",
+      "scenario": "missing_total",
+      "sha256": "2f82bcaddb0c9a44868be9bce9fcd63266819ecb328509be7b540395547b94e1",
+      "expected_fields": {
+        "supplier": "Riverbend Analytics Demo",
+        "invoice_number": "DEMO-2026-004",
+        "invoice_date": "2026-10-23",
+        "total_amount": null,
+        "currency": "PLN"
+      },
+      "expected_missing_fields": [
+        "total_amount"
+      ],
+      "duplicate_of": null
+    },
+    {
+      "file": "05_invoice_duplicate.pdf",
+      "scenario": "duplicate",
+      "sha256": "8125080e9a393b976e1cb5c674ca1affeb341e42036bcfccc5647eac82888355",
+      "expected_fields": {
+        "supplier": "Northstar Office Demo",
+        "invoice_number": "DEMO-2026-001",
+        "invoice_date": "2026-10-20",
+        "total_amount": "1234.50",
+        "currency": "PLN"
+      },
+      "expected_missing_fields": [],
+      "duplicate_of": "01_invoice_pln.pdf"
+    }
+  ]
+}

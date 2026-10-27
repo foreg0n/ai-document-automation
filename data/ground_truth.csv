@@ -1,0 +1,6 @@
+﻿file,supplier,invoice_number,invoice_date,total_amount,currency,scenario,duplicate_of
+01_invoice_pln.pdf,Northstar Office Demo,DEMO-2026-001,2026-10-20,1234.50,PLN,valid,
+02_invoice_eur.pdf,Blue Harbor Studio Demo,DEMO-2026-002,2026-10-21,980.00,EUR,valid,
+03_invoice_usd.pdf,Cedar Cloud Services Demo,DEMO-2026-003,2026-10-22,2750.00,USD,valid,
+04_invoice_missing_total.pdf,Riverbend Analytics Demo,DEMO-2026-004,2026-10-23,,PLN,missing_total,
+05_invoice_duplicate.pdf,Northstar Office Demo,DEMO-2026-001,2026-10-20,1234.50,PLN,duplicate,01_invoice_pln.pdf

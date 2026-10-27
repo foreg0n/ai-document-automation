@@ -1,0 +1,61 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+6 0 obj
+<< /Length 2062 >>
+stream
+0.120 0.380 0.300 rg 0.00 829.89 595.28 12.00 re f
+BT /F1 9 Tf 0.120 0.380 0.300 rg 1 0 0 1 44.00 798.89 Tm (AI DOCUMENT AUTOMATION / SYNTHETIC DATA) Tj ET
+0.120 0.380 0.300 rg 44.00 685.89 507.00 84.00 re f
+BT /F2 29 Tf 1.000 1.000 1.000 rg 1 0 0 1 60.00 729.89 Tm (INVOICE) Tj ET
+BT /F1 11 Tf 1.000 1.000 1.000 rg 1 0 0 1 60.00 702.89 Tm (DEMO-2026-003) Tj ET
+BT /F2 9 Tf 0.130 0.190 0.270 rg 1 0 0 1 44.00 648.89 Tm (ISSUED BY) Tj ET
+BT /F2 17 Tf 0.130 0.190 0.270 rg 1 0 0 1 44.00 625.89 Tm (Cedar Cloud Services Demo) Tj ET
+BT /F1 11 Tf 0.130 0.190 0.270 rg 1 0 0 1 44.00 595.89 Tm (Invoice date: October 22, 2026) Tj ET
+BT /F1 10 Tf 0.130 0.190 0.270 rg 1 0 0 1 318.00 595.89 Tm (Due date: November 05, 2026) Tj ET
+BT /F2 9 Tf 0.130 0.190 0.270 rg 1 0 0 1 44.00 548.89 Tm (BILL TO) Tj ET
+BT /F2 14 Tf 0.130 0.190 0.270 rg 1 0 0 1 44.00 525.89 Tm (Example Client Demo) Tj ET
+BT /F1 10 Tf 0.130 0.190 0.270 rg 1 0 0 1 44.00 504.89 Tm (Internal demonstration project) Tj ET
+0.930 0.950 0.970 rg 44.00 435.89 507.00 30.00 re f
+BT /F2 10 Tf 0.120 0.380 0.300 rg 1 0 0 1 58.00 445.89 Tm (SERVICES) Tj ET
+BT /F1 11 Tf 0.130 0.190 0.270 rg 1 0 0 1 58.00 410.89 Tm (01   Cloud environment setup) Tj ET
+BT /F1 11 Tf 0.130 0.190 0.270 rg 1 0 0 1 58.00 378.89 Tm (02   Application deployment) Tj ET
+0.82 0.85 0.89 RG 0.7 w 44.00 348.89 m 551.00 348.89 l S
+BT /F1 11 Tf 0.130 0.190 0.270 rg 1 0 0 1 44.00 315.89 Tm (Billing currency: USD) Tj ET
+0.930 0.950 0.970 rg 300.00 205.89 251.00 84.00 re f
+BT /F2 10 Tf 0.120 0.380 0.300 rg 1 0 0 1 316.00 263.89 Tm (TOTAL AMOUNT) Tj ET
+BT /F2 21 Tf 0.130 0.190 0.270 rg 1 0 0 1 316.00 229.89 Tm (2,750.00 USD) Tj ET
+BT /F1 10 Tf 0.130 0.190 0.270 rg 1 0 0 1 44.00 155.89 Tm (Service descriptions only; no line-item amounts are provided.) Tj ET
+0.82 0.85 0.89 RG 0.7 w 44.00 87.89 m 551.00 87.89 l S
+BT /F2 10 Tf 0.120 0.380 0.300 rg 1 0 0 1 44.00 64.89 Tm (SYNTHETIC SAMPLE - NOT VALID FOR PAYMENT) Tj ET
+BT /F1 9 Tf 0.130 0.190 0.270 rg 1 0 0 1 44.00 45.89 Tm (Fictional supplier and client. No bank or tax information.) Tj ET
+endstream
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000121 00000 n 
+0000000263 00000 n 
+0000000333 00000 n 
+0000000408 00000 n 
+trailer
+<< /Size 7 /Root 1 0 R >>
+startxref
+2522
+%%EOF
