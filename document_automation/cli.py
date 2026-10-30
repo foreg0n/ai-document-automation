@@ -1,7 +1,8 @@
-"""Command-line entry point for the text extraction stage."""
+"""Command-line entry points for reading, processing, and validating invoices."""
 import argparse
 import json
 import sys
+from datetime import date
 from pathlib import Path
 
 from .config import ConfigurationError, load_settings
@@ -9,6 +10,8 @@ from .invoice import InvoiceFormatError
 from .llm_client import APIError
 from .pdf_text import ExtractedDocument, TextExtractionError, extract_pdf_text
 from .pipeline import process_pdf
+from .validation import ValidationReport
+from .validation_files import collect_field_files, validate_saved_fields
 
 
 def collect_pdf_files(source: Path) -> list[Path]:
@@ -70,6 +73,50 @@ def save_extraction(
     return text_path, json_path
 
 
+def parse_reference_date(value: str) -> date:
+    try:
+        parsed = date.fromisoformat(value)
+        if parsed.isoformat() != value:
+            raise ValueError
+        return parsed
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("Use a real calendar date in YYYY-MM-DD format.") from exc
+
+
+def print_review_reasons(report: ValidationReport) -> None:
+    for issue in report.issues:
+        location = f"{issue.field}: " if issue.field else ""
+        print(f"  [{issue.code}] {location}{issue.message}")
+
+
+def run_saved_validation(args: argparse.Namespace) -> int:
+    try:
+        files = collect_field_files(args.source)
+    except (ValueError, OSError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    reference_date = args.as_of or date.today()
+    passed = review = failed = 0
+    for path in files:
+        try:
+            output, report = validate_saved_fields(
+                path, args.output_dir, reference_date=reference_date, overwrite=args.overwrite,
+            )
+        except (ValueError, OSError, UnicodeError, RecursionError) as exc:
+            failed += 1
+            print(f"ERROR {path.name}: {exc}", file=sys.stderr)
+            continue
+        if report.requires_review:
+            review += 1
+        else:
+            passed += 1
+        print(f"{report.status.upper()} {path.name}")
+        print_review_reasons(report)
+        print(f"  {output}")
+    print(f"Validated {len(files)} file(s): {passed} passed, {review} need review, {failed} failed.")
+    return 1 if failed else 3 if review else 0
+
+
 def run_invoice_extraction(files: list[Path], args: argparse.Namespace) -> int:
     try:
         settings = load_settings(
@@ -81,12 +128,13 @@ def run_invoice_extraction(files: list[Path], args: argparse.Namespace) -> int:
         return 1
     if args.dry_run:
         print("DRY RUN: request previews only; no API calls or invoice-field results.")
-    succeeded = failed = 0
+    succeeded = failed = review = 0
+    reference_date = args.as_of or date.today()
     for path in files:
         try:
-            outputs, warnings = process_pdf(
+            outputs, warnings, report = process_pdf(
                 path, settings, args.output_dir,
-                dry_run=args.dry_run, overwrite=args.overwrite,
+                dry_run=args.dry_run, overwrite=args.overwrite, reference_date=reference_date,
             )
         except APIError as exc:
             failed += 1
@@ -97,20 +145,28 @@ def run_invoice_extraction(files: list[Path], args: argparse.Namespace) -> int:
             print(f"ERROR {path.name}: {exc}", file=sys.stderr)
             continue
         succeeded += 1
-        print(f"{'PREVIEW' if args.dry_run else 'OK'} {path.name}")
+        label = "PREVIEW" if args.dry_run else "OK"
+        if report is not None and report.requires_review:
+            label = "NEEDS_REVIEW"
+            review += 1
+        print(f"{label} {path.name}")
+        if report is not None:
+            print_review_reasons(report)
         for output in outputs:
             print(f"  {output}")
         for warning in warnings:
             print(f"WARNING {path.name}: {warning}", file=sys.stderr)
     skipped = len(files) - succeeded - failed
     print(f"Processed {len(files)} PDF(s): {succeeded} succeeded, {failed} failed, {skipped} skipped.")
-    return 1 if failed or skipped else 0
+    if not args.dry_run:
+        print(f"Validation: {succeeded - review} passed, {review} need review.")
+    return 1 if failed or skipped else 3 if review else 0
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="document_automation",
-        description="Read PDF text or extract invoice fields with a configured LLM.",
+        description="Read PDF text, extract invoice fields, or validate saved results.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
     extract = subparsers.add_parser("extract", help="Read a PDF or folder of PDFs")
@@ -130,7 +186,15 @@ def main(argv: list[str] | None = None) -> int:
     process.add_argument("--response-format", choices=("json_schema", "json_object"))
     process.add_argument("--dry-run", action="store_true", help="Save request previews without contacting the API")
     process.add_argument("--overwrite", action="store_true", help="Replace previous outputs")
+    process.add_argument("--as-of", type=parse_reference_date, help="Validation reference date YYYY-MM-DD (default: local computer date)")
+    validate = subparsers.add_parser("validate", help="Validate saved fields locally; no API calls")
+    validate.add_argument("source", type=Path, help="JSON fields file or folder of *.fields.json files")
+    validate.add_argument("--output-dir", type=Path, default=Path("output/validation"))
+    validate.add_argument("--overwrite", action="store_true", help="Replace previous validation reports")
+    validate.add_argument("--as-of", type=parse_reference_date, help="Reference date YYYY-MM-DD (default: local computer date)")
     args = parser.parse_args(argv)
+    if args.command == "validate":
+        return run_saved_validation(args)
     try:
         files = collect_pdf_files(args.source)
     except (ValueError, OSError) as exc:

@@ -73,7 +73,7 @@ class InvoiceExtractionTests(unittest.TestCase):
         with redirect_stdout(stdout), redirect_stderr(stderr):
             code = main([
                 "process", str(source), "--output-dir", str(self.output),
-                "--env-file", str(self.env_file), *options,
+                "--env-file", str(self.env_file), "--as-of", "2026-10-30", *options,
             ])
         return code, stdout.getvalue(), stderr.getvalue()
 
@@ -216,13 +216,16 @@ class InvoiceExtractionTests(unittest.TestCase):
         self.assertEqual(fields, FIELDS)
         self.assertEqual(metadata["model"], "actual-test-model")
         self.assertEqual(metadata["usage"]["total_tokens"], 150)
-        self.assertEqual(metadata["validation_status"], "not_run")
+        self.assertEqual(metadata["validation_status"], "passed")
+        self.assertEqual(metadata["validation_report"], "01_invoice_pln.pdf.validation.json")
+        report_file = self.output / metadata["validation_report"]
+        self.assertEqual(json.loads(report_file.read_text(encoding="utf-8"))["validation"]["status"], "passed")
         self.assertNotIn(SECRET, stdout + stderr + json.dumps(metadata) + json.dumps(fields))
 
     def test_missing_total_in_controlled_reply_stays_null(self):
         self.fake_reply(completion({**FIELDS, "total_amount": None}))
         code, _, stderr = self.run_cli(SAMPLES / "04_invoice_missing_total.pdf")
-        self.assertEqual(code, 0, stderr)
+        self.assertEqual(code, 3, stderr)
         path = self.output / "04_invoice_missing_total.pdf.fields.json"
         self.assertIsNone(json.loads(path.read_text(encoding="utf-8"))["total_amount"])
 
@@ -234,6 +237,7 @@ class InvoiceExtractionTests(unittest.TestCase):
         self.opener.open.assert_not_called()
         self.assertEqual(len(list(self.output.glob("*.request.json"))), 5)
         self.assertFalse(list(self.output.glob("*.fields.json")))
+        self.assertFalse(list(self.output.glob("*.validation.json")))
         preview = json.loads((self.output / "01_invoice_pln.pdf.request.json").read_text(encoding="utf-8"))
         self.assertEqual(preview["mode"], "dry_run")
         self.assertEqual(preview["request_body"]["model"], "preview-model")
@@ -329,6 +333,28 @@ class InvoiceExtractionTests(unittest.TestCase):
                                   "total_tokens": 150, "secret": SECRET})
         result = parse_completion(reply, "requested-model")
         self.assertEqual(result.usage, {"total_tokens": 150})
+
+    def test_review_report_preserves_problematic_model_values(self):
+        fields = {**FIELDS, "invoice_date": "2026-02-30", "total_amount": "-3.00", "currency": "CHF"}
+        self.fake_reply(completion(fields))
+        code, stdout, stderr = self.run_cli(SAMPLES / "01_invoice_pln.pdf")
+        self.assertEqual(code, 3, stderr)
+        self.assertIn("NEEDS_REVIEW", stdout)
+        saved = json.loads((self.output / "01_invoice_pln.pdf.fields.json").read_text(encoding="utf-8"))
+        report = json.loads((self.output / "01_invoice_pln.pdf.validation.json").read_text(encoding="utf-8"))
+        self.assertEqual(saved, fields)
+        self.assertEqual({issue["code"] for issue in report["validation"]["issues"]},
+                         {"invalid_date", "non_positive_amount", "unsupported_currency"})
+
+    def test_existing_validation_report_prevents_another_api_call(self):
+        self.output.mkdir()
+        report = self.output / "01_invoice_pln.pdf.validation.json"
+        report.write_text("earlier report", encoding="utf-8")
+        code, _, stderr = self.run_cli(SAMPLES / "01_invoice_pln.pdf")
+        self.assertEqual(code, 1)
+        self.assertIn("--overwrite", stderr)
+        self.opener.open.assert_not_called()
+        self.assertEqual(report.read_text(encoding="utf-8"), "earlier report")
 
 
 if __name__ == "__main__":

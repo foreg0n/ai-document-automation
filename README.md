@@ -3,7 +3,7 @@
 A portfolio project built in eight small stages: invoice upload, text extraction,
 structured AI extraction, validation, human review, storage, and CSV export.
 
-**Current stage: 3 / 8 - LLM invoice-field extraction and request previews.**
+**Current stage: 4 / 8 - deterministic field validation and review reasons.**
 
 The stage 3 integration is implemented and tested with controlled API responses.
 A live provider run still needs your API key and model ID; no real-model
@@ -113,11 +113,12 @@ A live run sends document text to the configured provider and can incur API
 charges. The default is one request per PDF, with no automatic retries.
 Use a single PDF for your first live check before processing the whole folder.
 
-Successful runs save two files under `output/invoices/`:
+Successful live runs save three files under `output/invoices/`:
 
 - `invoice.pdf.fields.json`: exactly five nullable string fields.
 - `invoice.pdf.meta.json`: source filename, page count, model, available token
-  usage, text-reader warnings, and `validation_status: "not_run"`.
+  usage, text-reader warnings, and the current validation status.
+- `invoice.pdf.validation.json`: deterministic check results and review reasons.
 
 Example field format (illustration, not a recorded live response):
 
@@ -132,8 +133,8 @@ Example field format (illustration, not a recorded live response):
 ```
 
 Missing values must be JSON `null`. Amounts are strings, not binary floating-point
-numbers. The prompt asks for normalized dates and amounts; deterministic checks
-of their formats and plausibility will be added in stage 4.
+numbers. The prompt asks for normalized dates and amounts; stage 4 checks their
+formats and basic plausibility after the response has been parsed.
 
 Use `--response-format json_object` explicitly if the selected endpoint supports
 JSON mode but not JSON Schema. No automatic format fallback is performed.
@@ -141,7 +142,7 @@ Both modes are checked locally for exactly five keys and string-or-null values.
 Malformed, duplicate-key, truncated, refused, and tool-call responses are rejected.
 
 Output conflicts are checked before contacting the API. `--overwrite` explicitly
-allows replacing previous results. As in stage 2, the two output files are not a
+allows replacing previous results. As in stage 2, the output files are not a
 single transaction: a failure during overwrite can require rerunning the command.
 Do not run concurrent commands writing to the same output directory.
 
@@ -155,6 +156,59 @@ The `.env` file, generated outputs, and the virtual environment are ignored by G
 The simple `.env` reader accepts `KEY=value`, matching single/double quotes, and
 full-line comments. It does not support `export`, interpolation, or inline comments.
 
+## Stage 4: deterministic validation
+
+`process` now automatically checks parsed invoice fields and preserves the
+original values. A report has status `passed` or `needs_review`, a reference
+date, a rules version, and a list of issues with `code`, `field`, and `message`.
+The same fields, reader warnings, and reference date produce the same report.
+
+| Check | Demo policy |
+| --- | --- |
+| Required values | All five fields must be present; null or placeholders need review |
+| Date | Exact YYYY-MM-DD spelling, a real calendar date, no date after the reference date |
+| Amount | Plain decimal string with two places; zero and negative totals need review |
+| Currency | Three uppercase letters; only PLN, EUR, USD are supported initially |
+| Reader warnings | Any page without extracted text requires review |
+
+These are project rules, not universal accounting rules. A valid currency outside
+the demo list, a future-dated invoice, or a credit note may be legitimate and
+still require review. `passed` means the implemented rules found no issue; it
+does not prove that the model copied the correct facts from the document.
+No values are automatically repaired, inferred, or approved for payment.
+
+Recheck existing stage 3 fields without API calls or a key:
+
+```powershell
+.\.venv\Scripts\python.exe -m document_automation validate output/invoices --as-of 2026-10-30
+```
+
+You can pass one JSON file instead of a folder. Folders are searched only for
+`*.fields.json`, without recursion. Reports go to `output/validation/` by default.
+Use `--output-dir` to choose another directory and `--overwrite` to replace
+previous reports. Original fields and companion metadata remain unchanged.
+
+When a matching `*.meta.json` exists alongside a `*.fields.json` file, its source
+filename and warnings are checked. Corrupt or mismatched metadata is an error.
+If metadata is absent, only the supplied fields are checked and the report
+records `text_warnings_checked: false`. A separate report records the latest
+recheck; the original metadata describes its original processing run.
+
+Both `process` and `validate` accept `--as-of YYYY-MM-DD`. If omitted, they use
+the local computer date once per batch. An explicit reference date makes later
+rechecks reproducible. Request previews are not validated invoice results.
+
+For a runnable offline demonstration with the included reference answers:
+
+```powershell
+.\.venv\Scripts\python.exe -m tools.demo_validation --as-of 2026-10-30 --overwrite
+```
+
+This creates five reports in `output/validation-demo/`, marked
+`input_kind: "reference_fixture"`. Four pass the rules; the missing-total case
+needs review. The duplicate passes these field rules because duplicate detection
+belongs to stage 5. This demonstration does not run or evaluate a model.
+
 ## Errors and limitations
 
 - Missing, unreadable, damaged, and password-locked inputs produce an error.
@@ -167,8 +221,12 @@ full-line comments. It does not support `export`, interpolation, or inline comme
   that layer is not verified.
 - Text reading order in complex tables and layouts is not guaranteed.
 
-Exit codes: `0` means all inputs were processed (possibly with warnings);
-`1` means at least one input or output failed; `2` means invalid CLI arguments.
+Exit codes for `process` and `validate`: `0` means processing/checks completed
+without review reasons; `3` means results were saved and at least one needs
+review; `1` means an input, API, or output operation failed; `2` means invalid
+CLI arguments. An operation error takes precedence over exit code `3`.
+For `extract`, exit `0` still permits text-reader warnings. A successful
+`--dry-run` returns `0` without claiming invoice validation has passed.
 In `extract`, a failed file does not stop the rest of a batch. In `process`,
 API/network errors stop the batch to avoid repeating failing requests.
 No new invoice fields are saved for an input that fails extraction or the
@@ -185,6 +243,8 @@ The tests read real sample PDFs and check multiple layouts, page order, textless
 pages, invalid inputs, UTF-8 output, overwrite protection, and CLI batch behavior.
 Stage 3 tests use controlled API replies to exercise request serialization,
 configuration, JSON parsing, null handling, HTTP errors, and end-to-end saving.
+Stage 4 tests cover calendar boundaries, exact decimal strings, supported
+currencies, missing values, reader warnings, reference dates, and offline rechecks.
 No tests call an external LLM. They do not measure a real model's accuracy.
 
 ## Run stage 1
@@ -210,22 +270,28 @@ documents.
 | `document_automation/invoice.py` | Five-field schema, prompt, request building and basic response checks |
 | `document_automation/llm_client.py` | HTTP API client and completion parsing |
 | `document_automation/pipeline.py` | PDF-to-LLM processing and result persistence |
+| `document_automation/validation.py` | Deterministic rules, statuses and review reasons |
+| `document_automation/validation_files.py` | Offline rechecks of saved fields and companion warnings |
 | `document_automation/__main__.py` | Entry point for `python -m document_automation` |
 | `requirements.txt` | Pinned PDF reader dependency |
 | `tests/test_text_extraction.py` | Automated stage 2 behavior checks |
 | `tests/test_invoice_extraction.py` | Offline stage 3 integration checks |
+| `tests/test_validation.py` | Stage 4 rule and offline CLI checks |
 | `.env.example` | Configuration template without credentials |
 | `output/text/` | Generated extraction results; ignored by Git |
 | `output/invoices/` | Stage 3 previews or invoice fields and metadata; ignored by Git |
+| `output/validation/` | Recheck reports; ignored by Git |
 | `data/samples/` | Five text-based, synthetic invoice PDFs |
 | `data/ground_truth.json` | Reference field values and expected special cases |
 | `data/ground_truth.csv` | The same reference values in a spreadsheet-friendly table |
 | `tools/generate_samples.py` | Invoice definitions, rendering and reference generation |
 | `tools/fixture_pdf.py` | Dependency-free PDF drawing helper for stage 1 fixtures |
 | `tools/verify_samples.py` | Dataset integrity checks |
+| `tools/demo_validation.py` | Explicit reference-data validation demo without an LLM |
 | `docs/01-sample-data.md` | Russian stage 1 walkthrough |
 | `docs/02-text-extraction.md` | Russian stage 2 walkthrough and function explanations |
 | `docs/03-llm-extraction.md` | Russian stage 3 setup and function explanations |
+| `docs/04-validation.md` | Russian stage 4 rules, reports and function explanations |
 
 ## Dataset
 
@@ -251,7 +317,7 @@ extraction model.
 1. Synthetic PDFs and reference answers - complete.
 2. CLI for extracting text from text-based PDFs - complete.
 3. LLM extraction into the five-field JSON format - implemented; live provider verification pending configuration.
-4. Deterministic validation with clear review reasons.
+4. Deterministic validation with clear review reasons - complete.
 5. SQLite persistence and file-content duplicate detection.
 6. Upload, review and history UI with CSV export.
 7. Automatic intake from an incoming folder.
