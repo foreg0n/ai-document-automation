@@ -120,9 +120,11 @@ current form, and history retains every saved manual revision.
 
 ## The reviews table and stale-tab protection
 
-The database schema changes from version 1 to version 2.
+Stage 6 introduced database schema version 2.
 A transactional migration adds `reviews` while preserving earlier documents
 and attempts. The CLI can read a v1 database without migrating it.
+Stage 7 adds intake receipts in schema v3; current write connections migrate
+v1/v2 databases to v3. See [folder intake](07-folder-intake.md).
 
 The new table stores document ID, manual field JSON, rule results,
 confirmation state, note, and timestamp. Each save appends a row.

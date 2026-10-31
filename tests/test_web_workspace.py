@@ -264,7 +264,7 @@ class WebLiveAndMigrationTests(unittest.TestCase):
                 self.assertEqual(store.schema_version, 1)
                 self.assertEqual(store.get(1)["reviews"], [])
             with DocumentStore(path) as store:
-                self.assertEqual(store.schema_version, 2)
+                self.assertEqual(store.schema_version, 3)
                 self.assertEqual(store.get(1)["source_file"], "existing.pdf")
                 self.assertEqual(store.get(1)["created_at"], "original-time")
                 self.assertEqual(store.review_rows()[0]["review_status"], "unreviewed")

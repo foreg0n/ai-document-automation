@@ -1,7 +1,10 @@
 """Command-line entry points for reading, processing, and validating invoices."""
 import argparse
 import json
+import math
 import sys
+import time
+from collections import Counter
 from datetime import date
 from pathlib import Path
 
@@ -208,6 +211,67 @@ def run_history(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_watch(args: argparse.Namespace) -> int:
+    from .intake import FolderIntake, wait_for_quiet_period
+
+    counts = Counter()
+    watcher = None
+
+    def scan(paths=None):
+        for event in watcher.poll(paths):
+            counts[event.status] += 1
+            print(f"{event.status.upper()} {event.source.name}", flush=True)
+            if event.message:
+                print(f"  {event.message}", flush=True)
+            if event.result is not None:
+                print(f"  Stored document #{event.result.document_id}", flush=True)
+                if event.result.report is not None:
+                    if event.result.report.requires_review:
+                        counts["review"] += 1
+                    print_review_reasons(event.result.report)
+                for output in event.result.outputs:
+                    print(f"  {output}", flush=True)
+                for warning in event.result.warnings:
+                    print(f"WARNING {event.source.name}: {warning}", file=sys.stderr)
+
+    try:
+        for name, value in (("interval", args.interval), ("stable-seconds", args.stable_seconds)):
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError(f"--{name} must be a positive finite number.")
+        with DocumentStore(args.database) as store:
+            watcher = FolderIntake(
+                args.source, store, archive=args.archive_dir, exports=args.output_dir,
+                stable_seconds=args.stable_seconds, retry_failed=args.retry_failed,
+                settings_loader=lambda: load_settings(
+                    args.env_file, model=args.model, response_format=args.response_format,
+                ), today=(lambda: args.as_of) if args.as_of else date.today,
+            )
+            print(f"Watching: {watcher.incoming}. Database: {args.database}", flush=True)
+            print("Original PDFs are kept. Ctrl+C stops intake; service errors stop without automatic retries.", flush=True)
+            if args.once:
+                # A bounded pass over startup inputs, with two observations.
+                paths = watcher.candidates()
+                scan(paths)
+                if watcher.pending:
+                    wait_for_quiet_period(args.stable_seconds)
+                    scan(paths)
+            else:
+                while True:
+                    scan()
+                    time.sleep(args.interval)
+    except KeyboardInterrupt:
+        print("\nIntake stopped.")
+    except (APIError, ConfigurationError, StorageError, OSError, ValueError, UnicodeError) as exc:
+        counts["failed"] += 1
+        print(f"ERROR: {exc} Intake stopped; no automatic retries.", file=sys.stderr)
+    pending = watcher.pending if watcher is not None else 0
+    failed = counts["failed"] + counts["skipped_failed"]
+    print(f"Intake: {counts['processed']} processed, {counts['duplicate']} duplicates, "
+          f"{counts['skipped']} already imported, {counts['review']} need review, "
+          f"{failed} failed, {pending} pending.")
+    return 1 if failed else 4 if pending else 3 if counts["review"] else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="document_automation",
@@ -233,6 +297,19 @@ def main(argv: list[str] | None = None) -> int:
     process.add_argument("--overwrite", action="store_true", help="Replace previous outputs")
     process.add_argument("--database", type=Path, default=DEFAULT_DATABASE, help="SQLite result database")
     process.add_argument("--as-of", type=parse_reference_date, help="Validation reference date YYYY-MM-DD (default: local computer date)")
+    watch = subparsers.add_parser("watch", help="Automatically process stable PDFs from an incoming folder")
+    watch.add_argument("source", type=Path, nargs="?", default=Path("data/incoming"))
+    watch.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+    watch.add_argument("--archive-dir", type=Path, default=Path("data/intake"))
+    watch.add_argument("--output-dir", type=Path, default=Path("output/intake"))
+    watch.add_argument("--env-file", type=Path, default=Path(".env"))
+    watch.add_argument("--model", help="Override LLM_MODEL")
+    watch.add_argument("--response-format", choices=("json_schema", "json_object"))
+    watch.add_argument("--interval", type=float, default=1, help="Seconds between polls (default: 1)")
+    watch.add_argument("--stable-seconds", type=float, default=2, help="Required unchanged period (default: 2 seconds)")
+    watch.add_argument("--once", action="store_true", help="Check startup PDFs twice, then exit; pending inputs return 4")
+    watch.add_argument("--retry-failed", action="store_true", help="Retry each previously failed input once this run")
+    watch.add_argument("--as-of", type=parse_reference_date, help="Fixed validation date YYYY-MM-DD (default: date at processing time)")
     validate = subparsers.add_parser("validate", help="Validate saved fields locally; no API calls")
     validate.add_argument("source", type=Path, help="JSON fields file or folder of *.fields.json files")
     validate.add_argument("--output-dir", type=Path, default=Path("output/validation"))
@@ -252,6 +329,8 @@ def main(argv: list[str] | None = None) -> int:
     serve.add_argument("--uploads", type=Path, default=Path("data/uploads"))
     serve.add_argument("--env-file", type=Path, default=Path(".env"))
     args = parser.parse_args(argv)
+    if args.command == "watch":
+        return run_watch(args)
     if args.command == "serve":
         if not 1 <= args.port <= 65535:
             parser.error("Port must be between 1 and 65535.")

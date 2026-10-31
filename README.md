@@ -3,7 +3,7 @@
 A portfolio project built in eight small stages: invoice upload, text extraction,
 structured AI extraction, validation, human review, storage, and CSV export.
 
-**Current stage: 6 / 8 - local upload, history, human review, and CSV workspace.**
+**Current stage: 7 / 8 - automatic PDF intake from an incoming folder.**
 
 The stage 3 integration is implemented and tested with controlled API responses.
 A live provider run still needs your API key and model ID; no real-model
@@ -331,10 +331,11 @@ status, validation status, and input provenance. Missing values are blank;
 CSV is UTF-8 with BOM. Formula-like cell values are escaped for spreadsheet use.
 Export goes through the browser download; no external service is involved.
 
-Database schema v1 is upgraded transactionally to v2 by adding an append-only
+Stage 6 introduced schema v2 by adding an append-only
 `reviews` table. Existing documents, attempts, and original field JSON remain
 intact. The CLI can still read v1 databases without modifying them; opening the
-workspace or another write connection performs the migration.
+workspace or another write connection performs the migration. Current write
+connections also add the stage 7 intake receipts and migrate to schema v3.
 
 The server binds to `127.0.0.1` and is intended for one local workspace. It uses
 a process session cookie and CSRF token; API keys remain in server-side settings.
@@ -349,6 +350,55 @@ guards were also tested directly without sockets. JavaScript syntax and DOM
 IDs were checked. Chrome/Edge could not launch successfully for screenshot QA,
 so full HTTP/browser and visual verification remain to be run on an unrestricted
 desktop. The HTTP tests stay enabled automatically where local TCP works.
+
+## Stage 7: automatic incoming-folder intake
+
+After configuring `.env`, keep this command running and copy PDFs into
+`data/incoming/`:
+
+```powershell
+.\.venv\Scripts\python.exe -m document_automation watch
+```
+
+The watcher creates the folder, polls every second, and requires two seconds
+with unchanged file identity, size, and modification time before reading.
+It checks again around the bounded read, archives a snapshot under
+`data/intake/<sha256>/`, and uses the existing pipeline. Original incoming PDFs
+are kept. JSON results go to `output/intake/<sha256>/`; same-name files with
+different content have separate archives and exports.
+
+SQLite receipts prevent repeated attempts on every poll and after a restart.
+Duplicates reuse completed model results. The same live database is available
+to `serve` for review and CSV export; refresh the workspace history after intake.
+One watcher handles inputs sequentially. Use one watcher per incoming folder.
+
+For a bounded pass, use `watch --once`. For a slow producer, increase
+`--stable-seconds`; the strongest handoff is to write a temporary non-PDF name
+and rename it to `.pdf` only when complete. Quiet time alone cannot guarantee
+that a producer will not resume writing. Subfolders and symlinks are ignored;
+the limit is 20 MB per PDF. Ctrl+C stops the foreground watcher.
+
+An input failure is remembered until its content changes or you explicitly use
+`--retry-failed`. API/configuration/storage errors stop intake without a retry
+loop; fix the cause and restart. Exit codes follow `process`, with `4` for
+pending inputs and `1` also for skipped previous input failures. Already imported
+receipts do not count as newly handled review results.
+
+Try the scanner without a key or API calls:
+
+```powershell
+.\.venv\Scripts\python.exe -m tools.demo_intake --as-of 2026-10-31
+```
+
+On a fresh `output/intake-demo/`, five samples create four reference-fixture
+documents, one duplicate, and one result needing review. A repeat skips all five
+without adding attempts. This demo writes SQLite records and archived PDFs,
+not model JSON exports. Live intake never imports the reference processor.
+
+Schema v3 adds the `intake_receipts` table. Write connections migrate v1/v2
+transactionally while preserving documents, attempts, and manual reviews;
+read-only commands still support older databases. See the English
+[stage 7 walkthrough](docs/07-folder-intake.md) for options and recovery details.
 
 ## Errors and limitations
 
@@ -394,6 +444,9 @@ Stage 6 checks cover schema migration, review revisions and conflicts, original
 field preservation, confirmation, CSV scopes and escaping, uploads, queue limits,
 and source PDF integrity. HTTP tests need the development-only `httpx` package;
 they check loopback availability before initializing Windows asyncio.
+Stage 7 checks cover stable snapshots, changes during copies, continuous
+arrival, persistent receipts, retries, deduplication, export recovery, pending
+inputs, and v2-to-v3 migration with existing reviews preserved.
 No tests call an external LLM. They do not measure a real model's accuracy.
 
 ## Run stage 1
@@ -419,6 +472,7 @@ documents.
 | `document_automation/invoice.py` | Five-field schema, prompt, request building and basic response checks |
 | `document_automation/llm_client.py` | HTTP API client and completion parsing |
 | `document_automation/pipeline.py` | PDF-to-LLM processing and result persistence |
+| `document_automation/intake.py` | Stable-file polling, managed snapshots and durable intake receipts |
 | `document_automation/validation.py` | Deterministic rules, statuses and review reasons |
 | `document_automation/validation_files.py` | Offline rechecks of saved fields and companion warnings |
 | `document_automation/storage.py` | SQLite schema, reservations, result persistence and history |
@@ -433,12 +487,15 @@ documents.
 | `tests/test_validation.py` | Stage 4 rule and offline CLI checks |
 | `tests/test_storage.py` | Real SQLite persistence and concurrency checks |
 | `tests/test_web_workspace.py` | Workspace operations, migration and HTTP checks |
+| `tests/test_intake.py` | Folder intake, recovery, CLI and schema v3 checks |
 | `.env.example` | Configuration template without credentials |
 | `output/text/` | Generated extraction results; ignored by Git |
 | `output/invoices/` | Stage 3 previews or invoice fields and metadata; ignored by Git |
 | `output/validation/` | Recheck reports; ignored by Git |
 | `data/documents.sqlite3` | Live result database; ignored by Git |
 | `data/uploads/` | Managed uploaded PDFs; ignored by Git |
+| `data/incoming/` | Default incoming PDFs; ignored by Git |
+| `data/intake/` | Managed intake PDF snapshots; ignored by Git |
 | `data/samples/` | Five text-based, synthetic invoice PDFs |
 | `data/ground_truth.json` | Reference field values and expected special cases |
 | `data/ground_truth.csv` | The same reference values in a spreadsheet-friendly table |
@@ -447,12 +504,14 @@ documents.
 | `tools/verify_samples.py` | Dataset integrity checks |
 | `tools/demo_validation.py` | Explicit reference-data validation demo without an LLM |
 | `tools/demo_storage.py` | Separate reference-data SQLite and duplicate demonstration |
+| `tools/demo_intake.py` | Offline folder-intake demonstration with an isolated fixture database |
 | `docs/01-sample-data.md` | English stage 1 walkthrough |
 | `docs/02-text-extraction.md` | English stage 2 walkthrough and function explanations |
 | `docs/03-llm-extraction.md` | English stage 3 setup and function explanations |
 | `docs/04-validation.md` | English stage 4 rules, reports and function explanations |
 | `docs/05-storage.md` | English SQLite, hash and history walkthrough |
 | `docs/06-workspace.md` | English web workspace and manual-review walkthrough |
+| `docs/07-folder-intake.md` | English automatic intake and recovery walkthrough |
 
 ## Dataset
 
@@ -481,7 +540,7 @@ extraction model.
 4. Deterministic validation with clear review reasons - complete.
 5. SQLite persistence and file-content duplicate detection - complete.
 6. Upload, review and history UI with CSV export - implemented; HTTP/browser QA limited by execution environment.
-7. Automatic intake from an incoming folder.
+7. Automatic intake from an incoming folder - complete; controlled/offline verification, live provider run pending configuration.
 8. Docker, reproducible demo and measured portfolio results.
 
 Five synthetic samples are a development smoke-test set, not evidence of

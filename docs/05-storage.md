@@ -15,6 +15,8 @@ The database and SQLite sidecar files are excluded from Git.
 Stage 6 adds the browser workspace and separate manual revisions.
 The schema upgrades to v2 while preserving original records:
 [stage 6](06-workspace.md).
+Stage 7 adds durable intake receipts in schema v3; current write connections
+upgrade both v1 and v2 databases. See [folder intake](07-folder-intake.md).
 
 ## Demonstration without an API
 

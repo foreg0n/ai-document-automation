@@ -1,6 +1,7 @@
 """SQLite results and short reservations for exact-content deduplication."""
 import hashlib
 import json
+import os
 import re
 import sqlite3
 import uuid
@@ -12,7 +13,7 @@ from typing import Callable
 
 DEFAULT_DATABASE = Path("data/documents.sqlite3")
 APPLICATION_ID = 0x41494441
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 LEASE_SECONDS = 900
 SCHEMA = """
 CREATE TABLE store_info (
@@ -60,6 +61,19 @@ CREATE TABLE reviews (
     created_at TEXT NOT NULL
 );
 CREATE INDEX reviews_document_id ON reviews(document_id, id);
+"""
+INTAKE_SCHEMA = """
+CREATE TABLE intake_receipts (
+    source_path TEXT NOT NULL,
+    sha256 TEXT NOT NULL CHECK (length(sha256) = 64),
+    state TEXT NOT NULL CHECK (state IN ('completed', 'failed')),
+    document_id INTEGER REFERENCES documents(id),
+    error_type TEXT,
+    finished_at TEXT NOT NULL,
+    PRIMARY KEY (source_path, sha256),
+    CHECK ((state = 'completed' AND document_id IS NOT NULL AND error_type IS NULL)
+        OR (state = 'failed' AND error_type IS NOT NULL))
+);
 """
 
 
@@ -120,7 +134,7 @@ class DocumentStore:
                 # One script makes schema initialization atomic as well.
                 try:
                     self.connection.executescript(
-                        "BEGIN IMMEDIATE;\n" + SCHEMA + REVIEWS_SCHEMA
+                        "BEGIN IMMEDIATE;\n" + SCHEMA + REVIEWS_SCHEMA + INTAKE_SCHEMA
                         + f"\nPRAGMA application_id = {APPLICATION_ID};"
                         + f"\nPRAGMA user_version = {SCHEMA_VERSION};"
                     )
@@ -130,7 +144,7 @@ class DocumentStore:
                     self.connection.rollback()
                     raise
                 version, application = SCHEMA_VERSION, APPLICATION_ID
-            if version not in (1, SCHEMA_VERSION) or application != APPLICATION_ID:
+            if version not in (1, 2, SCHEMA_VERSION) or application != APPLICATION_ID:
                 raise StorageError("Unsupported database format or schema version.")
             row = self.connection.execute("SELECT input_kind FROM store_info WHERE id=1").fetchone()
             if row is None:
@@ -138,12 +152,22 @@ class DocumentStore:
             self.input_kind = row[0]
             if not readonly and self.input_kind != input_kind:
                 raise StorageError("Reference-fixture and LLM results must use separate databases.")
-            if version == 1 and not readonly:
+            if version < SCHEMA_VERSION and not readonly:
                 try:
-                    self.connection.executescript(
-                        "BEGIN IMMEDIATE;\n" + REVIEWS_SCHEMA
-                        + f"\nPRAGMA user_version = {SCHEMA_VERSION};\nCOMMIT;"
-                    )
+                    # Recheck under the write lock: another process may have
+                    # migrated the database since our initial version read.
+                    self.connection.execute("BEGIN IMMEDIATE")
+                    current = self.connection.execute("PRAGMA user_version").fetchone()[0]
+                    if current not in (1, 2, SCHEMA_VERSION):
+                        raise StorageError("Unsupported database format or schema version.")
+                    if current == 1:
+                        for statement in REVIEWS_SCHEMA.split(";"):
+                            if statement.strip():
+                                self.connection.execute(statement)
+                    if current < 3:
+                        self.connection.execute(INTAKE_SCHEMA)
+                    self.connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+                    self.connection.commit()
                 except Exception:
                     self.connection.rollback()
                     raise
@@ -297,6 +321,41 @@ class DocumentStore:
             return [{**dict(row), "input_kind": self.input_kind} for row in rows]
         except sqlite3.Error as exc:
             raise StorageError(f"Cannot read document history: {exc}") from exc
+
+    def intake_receipt(self, source: Path, digest: str) -> dict | None:
+        """Find the durable outcome for this incoming path and byte content."""
+        if self.schema_version < 3:
+            return None
+        try:
+            row = self.connection.execute(
+                "SELECT * FROM intake_receipts WHERE source_path=? AND sha256=?",
+                (os.path.normcase(str(source.resolve())), digest),
+            ).fetchone()
+            return dict(row) if row is not None else None
+        except sqlite3.Error as exc:
+            raise StorageError(f"Cannot read intake receipt: {exc}") from exc
+
+    def record_intake(
+        self, source: Path, digest: str, *, document_id: int | None = None,
+        error_type: str | None = None,
+    ) -> None:
+        """Checkpoint success or an input failure; store no exception body."""
+        with self.transaction():
+            if error_type is None:
+                row = self.connection.execute(
+                    "SELECT state, sha256 FROM documents WHERE id=?", (document_id,),
+                ).fetchone()
+                if row is None or row["state"] != "completed" or row["sha256"] != digest:
+                    raise StorageError("An intake receipt must reference matching completed content.")
+            self.connection.execute(
+                "INSERT INTO intake_receipts(source_path,sha256,state,document_id,error_type,finished_at) "
+                "VALUES(?,?,?,?,?,?) ON CONFLICT(source_path,sha256) DO UPDATE SET "
+                "state=excluded.state,document_id=excluded.document_id,"
+                "error_type=excluded.error_type,finished_at=excluded.finished_at "
+                "WHERE intake_receipts.state != 'completed'",
+                (os.path.normcase(str(source.resolve())), digest, "failed" if error_type else "completed",
+                 document_id, error_type, self.clock().astimezone(timezone.utc).isoformat()),
+            )
 
     def save_review(
         self, document_id: int, *, fields: dict, validation: dict,

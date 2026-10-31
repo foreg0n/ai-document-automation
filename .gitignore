@@ -10,3 +10,5 @@ output/
 *.sqlite3-*
 tests/tmp*/
 data/uploads/
+data/incoming/
+data/intake/
