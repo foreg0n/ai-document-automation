@@ -3,7 +3,23 @@
 A portfolio project built in eight small stages: invoice upload, text extraction,
 structured AI extraction, validation, human review, storage, and CSV export.
 
-**Current stage: 7 / 8 - automatic PDF intake from an incoming folder.**
+**Current stage: 8 / 8 - Docker packaging, reproducible demo, and measured reports.**
+
+All eight stages are implemented. Local checks pass; container execution,
+browser visual QA, and a live provider accuracy run still need verification.
+
+## Docker demo
+
+With Docker Desktop's Linux engine running:
+
+```powershell
+docker compose up --build demo
+```
+
+Open **http://127.0.0.1:8765/**. This uses reference fixtures without a key or
+model calls. Named volumes preserve results and reviews; demo and live state
+are separate. See [stage 8](docs/08-delivery.md) for live intake, tests, volumes,
+and the current container-verification limits.
 
 The stage 3 integration is implemented and tested with controlled API responses.
 A live provider run still needs your API key and model ID; no real-model
@@ -400,6 +416,46 @@ transactionally while preserving documents, attempts, and manual reviews;
 read-only commands still support older databases. See the English
 [stage 7 walkthrough](docs/07-folder-intake.md) for options and recovery details.
 
+## Stage 8: reproducible project demonstration
+
+Run the complete reference workflow locally:
+
+```powershell
+.\.venv\Scripts\python.exe -m tools.demo_project --as-of 2026-10-31
+```
+
+The tool verifies intake, deduplication, restart receipts, archived PDF previews,
+simulated review revisions, and CSV scopes. Each run has its own folder under
+`output/project-demo/` with Markdown/JSON observations, CSV files, PDFs, and a
+database. Five inputs produce four documents and one duplicate; a new observer
+skips all five without adding attempts. The missing-total result still needs
+review. All-results CSV has four rows; the simulated confirmed scope has one.
+
+The [captured reference run](docs/portfolio-results.md) records actual local
+timings. It uses known answers and automated review actions. **External model
+calls: zero; real-model accuracy: not measured.**
+
+After a separate live sample run, score saved original LLM fields offline:
+
+```powershell
+.\.venv\Scripts\python.exe -m tools.evaluate_results --database data/documents.sqlite3 --output output/evaluation.json
+```
+
+Evaluation uses unique PDF hashes, exact field comparisons, and explicit coverage;
+missing results count as incorrect and manual corrections are excluded.
+Reference-fixture databases cannot be used to report model accuracy.
+
+Docker packages the same application and tools with version-constrained
+dependencies. Compose publishes only a localhost port and mounts the live
+configuration at runtime. `/healthz` checks database access. The included
+GitHub Actions workflow builds/tests the container and checks HTTP/restart
+persistence after a manual push. It has not been run in this session.
+
+Stage 8 local verification: 146 checks passed and 14 HTTP tests were skipped
+due to the execution environment's local TCP restriction. Compose configuration
+is valid. Docker image build/run remains unverified: the engine is unavailable
+and buildx could not access its lock file here. No live provider was contacted.
+
 ## Errors and limitations
 
 - Missing, unreadable, damaged, and password-locked inputs produce an error.
@@ -480,14 +536,18 @@ documents.
 | `document_automation/web.py` | FastAPI routes, localhost session and static frontend |
 | `document_automation/web_static/` | Browser interface: HTML, CSS, vanilla JavaScript |
 | `document_automation/__main__.py` | Entry point for `python -m document_automation` |
-| `requirements.txt` | Pinned PDF reader dependency |
+| `requirements.txt` | Runtime dependencies with version constraints |
 | `requirements-dev.txt` | Test client dependency plus runtime requirements |
+| `constraints.txt` | Verified Python 3.12 dependency versions |
+| `Dockerfile`, `.dockerignore`, `compose.yaml` | Container image, build context and persistent services |
+| `.github/workflows/checks.yaml` | Container tests, report and HTTP/restart checks after push |
 | `tests/test_text_extraction.py` | Automated stage 2 behavior checks |
 | `tests/test_invoice_extraction.py` | Offline stage 3 integration checks |
 | `tests/test_validation.py` | Stage 4 rule and offline CLI checks |
 | `tests/test_storage.py` | Real SQLite persistence and concurrency checks |
 | `tests/test_web_workspace.py` | Workspace operations, migration and HTTP checks |
 | `tests/test_intake.py` | Folder intake, recovery, CLI and schema v3 checks |
+| `tests/test_delivery.py` | Complete demo, saved-result evaluation and container server settings |
 | `.env.example` | Configuration template without credentials |
 | `output/text/` | Generated extraction results; ignored by Git |
 | `output/invoices/` | Stage 3 previews or invoice fields and metadata; ignored by Git |
@@ -505,6 +565,8 @@ documents.
 | `tools/demo_validation.py` | Explicit reference-data validation demo without an LLM |
 | `tools/demo_storage.py` | Separate reference-data SQLite and duplicate demonstration |
 | `tools/demo_intake.py` | Offline folder-intake demonstration with an isolated fixture database |
+| `tools/demo_project.py` | Reproducible workflow with measured reports and CSV artifacts |
+| `tools/evaluate_results.py` | Offline exact-match scoring of original saved LLM fields |
 | `docs/01-sample-data.md` | English stage 1 walkthrough |
 | `docs/02-text-extraction.md` | English stage 2 walkthrough and function explanations |
 | `docs/03-llm-extraction.md` | English stage 3 setup and function explanations |
@@ -512,6 +574,8 @@ documents.
 | `docs/05-storage.md` | English SQLite, hash and history walkthrough |
 | `docs/06-workspace.md` | English web workspace and manual-review walkthrough |
 | `docs/07-folder-intake.md` | English automatic intake and recovery walkthrough |
+| `docs/08-delivery.md` | English Docker, demonstration, evaluation and function walkthrough |
+| `docs/portfolio-results.md` | Observed reference-run results with verification limits |
 
 ## Dataset
 
@@ -541,7 +605,7 @@ extraction model.
 5. SQLite persistence and file-content duplicate detection - complete.
 6. Upload, review and history UI with CSV export - implemented; HTTP/browser QA limited by execution environment.
 7. Automatic intake from an incoming folder - complete; controlled/offline verification, live provider run pending configuration.
-8. Docker, reproducible demo and measured portfolio results.
+8. Docker, reproducible demo and measured portfolio results - implemented; local reference report verified, container build/run pending a working engine.
 
 Five synthetic samples are a development smoke-test set, not evidence of
 real-world extraction accuracy. Larger, more varied data will be needed later.

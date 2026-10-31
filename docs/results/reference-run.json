@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "mode": "reference_fixture",
+  "measured_at_utc": "2026-10-31T22:07:05.261203+00:00",
+  "reference_date": "2026-10-31",
+  "external_model_calls": 0,
+  "model_accuracy": "not_measured",
+  "review_mode": "automated_simulation",
+  "environment": {
+    "python": "3.12.10",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "packages": {
+      "pypdfium2": "5.10.1",
+      "fastapi": "0.141.1",
+      "uvicorn": "0.52.3"
+    }
+  },
+  "dataset": {
+    "files": 5,
+    "unique_contents": 4,
+    "synthetic": true
+  },
+  "first_intake": {
+    "outcomes": {
+      "processed": 4,
+      "duplicate": 1
+    },
+    "wall_seconds": 2.185189,
+    "processing_seconds": 0.183832,
+    "quiet_period_seconds": 2,
+    "files": [
+      {
+        "file": "01_invoice_pln.pdf",
+        "outcome": "processed",
+        "document_id": 1,
+        "validation": "passed"
+      },
+      {
+        "file": "02_invoice_eur.pdf",
+        "outcome": "processed",
+        "document_id": 2,
+        "validation": "passed"
+      },
+      {
+        "file": "03_invoice_usd.pdf",
+        "outcome": "processed",
+        "document_id": 3,
+        "validation": "passed"
+      },
+      {
+        "file": "04_invoice_missing_total.pdf",
+        "outcome": "processed",
+        "document_id": 4,
+        "validation": "needs_review"
+      },
+      {
+        "file": "05_invoice_duplicate.pdf",
+        "outcome": "duplicate",
+        "document_id": 1,
+        "validation": "passed"
+      }
+    ]
+  },
+  "restart": {
+    "outcomes": {
+      "skipped": 5
+    },
+    "wall_seconds": 2.027367,
+    "processing_seconds": 0.02654,
+    "quiet_period_seconds": 2,
+    "files": [
+      {
+        "file": "01_invoice_pln.pdf",
+        "outcome": "skipped",
+        "document_id": null,
+        "validation": null
+      },
+      {
+        "file": "02_invoice_eur.pdf",
+        "outcome": "skipped",
+        "document_id": null,
+        "validation": null
+      },
+      {
+        "file": "03_invoice_usd.pdf",
+        "outcome": "skipped",
+        "document_id": null,
+        "validation": null
+      },
+      {
+        "file": "04_invoice_missing_total.pdf",
+        "outcome": "skipped",
+        "document_id": null,
+        "validation": null
+      },
+      {
+        "file": "05_invoice_duplicate.pdf",
+        "outcome": "skipped",
+        "document_id": null,
+        "validation": null
+      }
+    ]
+  },
+  "attempts_before_restart": 5,
+  "storage": {
+    "documents": 4,
+    "attempts": 5,
+    "intake_receipts": 5,
+    "reviews": 2
+  },
+  "validation": {
+    "passed": 3,
+    "needs_review": 1
+  },
+  "pdf_previews_verified": 4,
+  "csv": {
+    "all_rows": 4,
+    "confirmed_rows": 1
+  },
+  "checks_passed": true
+}

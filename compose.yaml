@@ -1,0 +1,77 @@
+name: ai-document-automation
+
+x-runtime: &runtime
+  image: ai-document-automation:local
+  build:
+    context: .
+    target: runtime
+  init: true
+
+x-health: &web-health
+  test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3).close()"]
+  interval: 15s
+  timeout: 5s
+  start_period: 20s
+  retries: 3
+
+services:
+  demo:
+    <<: *runtime
+    ports: ["127.0.0.1:8765:8000"]
+    volumes:
+      - demo-state:/app/state
+    healthcheck: *web-health
+
+  workspace:
+    <<: *runtime
+    profiles: [live]
+    command: ["python", "-m", "document_automation", "serve", "--host", "0.0.0.0", "--database", "/app/state/documents.sqlite3", "--uploads", "/app/state/uploads", "--output-dir", "/app/state/exports", "--env-file", "/app/config/.env"]
+    ports: ["127.0.0.1:8765:8000"]
+    volumes:
+      - live-state:/app/state
+      - type: bind
+        source: ./.env
+        target: /app/config/.env
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck: *web-health
+
+  watcher:
+    <<: *runtime
+    profiles: [intake]
+    command: ["python", "-m", "document_automation", "watch", "/app/state/incoming", "--database", "/app/state/documents.sqlite3", "--archive-dir", "/app/state/intake", "--output-dir", "/app/state/intake-exports", "--env-file", "/app/config/.env"]
+    stop_signal: SIGINT
+    volumes:
+      - live-state:/app/state
+      - type: bind
+        source: ./data/incoming
+        target: /app/state/incoming
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./.env
+        target: /app/config/.env
+        read_only: true
+        bind:
+          create_host_path: false
+
+  report:
+    <<: *runtime
+    profiles: [tools]
+    command: ["python", "-m", "tools.demo_project", "--output-dir", "/app/state/report"]
+    volumes:
+      - report-state:/app/state
+
+  tests:
+    profiles: [tools]
+    build:
+      context: .
+      target: test
+    init: true
+
+volumes:
+  demo-state:
+  live-state:
+  report-state:

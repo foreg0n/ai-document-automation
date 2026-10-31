@@ -325,8 +325,11 @@ def main(argv: list[str] | None = None) -> int:
     serve = subparsers.add_parser("serve", help="Open the local upload, review, history and CSV workspace")
     serve.add_argument("--database", type=Path, help="SQLite database (defaults depend on demo mode)")
     serve.add_argument("--port", type=int, default=8000)
+    serve.add_argument("--host", choices=("127.0.0.1", "0.0.0.0"), default="127.0.0.1",
+                       help="Listen address; use 0.0.0.0 inside a container")
     serve.add_argument("--demo", action="store_true", help="Use a separate reference-fixture workspace without API calls")
     serve.add_argument("--uploads", type=Path, default=Path("data/uploads"))
+    serve.add_argument("--output-dir", type=Path, default=Path("output/invoices"))
     serve.add_argument("--env-file", type=Path, default=Path(".env"))
     args = parser.parse_args(argv)
     if args.command == "watch":
@@ -342,9 +345,10 @@ def main(argv: list[str] | None = None) -> int:
                 from tools.demo_storage import main as seed_demo
                 if seed_demo(["--database", str(database)]) != 0:
                     return 1
-            app = create_app(database, demo=args.demo, uploads=args.uploads, env_file=args.env_file)
+            app = create_app(database, demo=args.demo, uploads=args.uploads,
+                             exports=args.output_dir, env_file=args.env_file)
             print(f"Workspace: http://127.0.0.1:{args.port} ({'reference demo' if args.demo else 'live model workspace'})")
-            uvicorn.run(app, host="127.0.0.1", port=args.port, proxy_headers=False, access_log=False)
+            uvicorn.run(app, host=args.host, port=args.port, proxy_headers=False, access_log=False)
         except ImportError:
             print("ERROR: Install web dependencies with python -m pip install -r requirements.txt", file=sys.stderr)
             return 1

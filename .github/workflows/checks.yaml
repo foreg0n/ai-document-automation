@@ -1,0 +1,85 @@
+name: Verify application and container
+
+on: [push, pull_request, workflow_dispatch]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Validate Compose services
+        run: docker compose --profile live --profile intake --profile tools config --quiet
+
+      - name: Run tests in the test image
+        run: docker compose --profile tools run --build --rm tests
+
+      - name: Run the complete reference demonstration
+        run: docker compose --profile tools up --build --abort-on-container-exit --exit-code-from report report
+
+      - name: Keep the measured report in the job summary
+        run: |
+          mkdir -p output/docker-report
+          docker compose cp report:/app/state/report/. output/docker-report
+          cat output/docker-report/*/report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Start the published demo port
+        run: docker compose up --build -d --wait --wait-timeout 60 demo
+
+      - name: Check HTTP session, simulated review and CSV
+        run: |
+          python3 - <<'PY'
+          import csv, io, json, re
+          from http.cookiejar import CookieJar
+          from urllib.request import HTTPCookieProcessor, Request, build_opener
+          base = 'http://127.0.0.1:8765'
+          client = build_opener(HTTPCookieProcessor(CookieJar()))
+          def get(path):
+              with client.open(base + path, timeout=5) as response:
+                  return response.read()
+          assert json.loads(get('/healthz')) == {'status': 'ok'}
+          html = get('/').decode()
+          token = re.search(r'<meta name="csrf-token" content="([^"]+)"', html).group(1)
+          assert json.loads(get('/api/documents'))['counts']['total'] == 4
+          document = json.loads(get('/api/documents/1'))
+          payload = dict(fields=document['fields'], expected_revision=document['review_revision'],
+                         confirmed=True, acknowledged=True,
+                         note='Automated HTTP smoke check; no human review performed.')
+          request = Request(base + '/api/documents/1/review', json.dumps(payload).encode(),
+                            headers={'Content-Type': 'application/json', 'X-CSRF-Token': token})
+          with client.open(request, timeout=5) as response:
+              assert json.load(response)['review_status'] == 'confirmed'
+          rows = list(csv.DictReader(io.StringIO(get('/api/export.csv?scope=confirmed').decode('utf-8-sig'))))
+          assert len(rows) == 1
+          print('PASS: real container HTTP, session, review and confirmed CSV.')
+          PY
+
+      - name: Restart and check persistent review
+        run: |
+          docker compose restart demo
+          docker compose up --no-build -d --wait --wait-timeout 60 demo
+          python3 - <<'PY'
+          import json
+          from http.cookiejar import CookieJar
+          from urllib.request import HTTPCookieProcessor, build_opener
+          client = build_opener(HTTPCookieProcessor(CookieJar()))
+          with client.open('http://127.0.0.1:8765/', timeout=5) as response:
+              response.read()
+          with client.open('http://127.0.0.1:8765/api/documents/1', timeout=5) as response:
+              assert json.load(response)['review_status'] == 'confirmed'
+          print('PASS: review persisted across container restart.')
+          PY
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker compose --profile tools logs
+
+      - name: Stop containers
+        if: always()
+        run: docker compose --profile live --profile intake --profile tools down

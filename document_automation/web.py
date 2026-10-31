@@ -73,6 +73,13 @@ def create_app(database: Path, *, demo=False, uploads=Path("data/uploads"),
         response.set_cookie("doc_workspace", token, httponly=True, samesite="strict")
         return response
 
+    @app.get("/healthz")
+    def health():
+        # Read-only access checks that the persistent workspace is available.
+        with workspace.store(readonly=True) as store:
+            store.connection.execute("SELECT id FROM store_info WHERE id=1").fetchone()
+        return {"status": "ok"}
+
     @app.get("/api/documents")
     def documents(q: str = Query("", max_length=200), status: str = "all", page: int = Query(1, ge=1)):
         if status not in {"all", "pending", "confirmed", "needs_review"}:

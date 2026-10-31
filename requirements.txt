@@ -1,3 +1,4 @@
+-c constraints.txt
 pypdfium2==5.10.1
 fastapi==0.141.1
 starlette==1.6.0

@@ -1,0 +1,21 @@
+# Allow only source, tests, and public fixtures into the build context.
+**
+!Dockerfile
+!requirements.txt
+!requirements-dev.txt
+!constraints.txt
+!document_automation/
+!document_automation/**
+!tools/
+!tools/**
+!tests/
+!tests/*.py
+!data/
+!data/samples/
+!data/samples/*.pdf
+!data/ground_truth.json
+!data/ground_truth.csv
+**/__pycache__/
+**/*.pyc
+**/.env
+**/.env.*

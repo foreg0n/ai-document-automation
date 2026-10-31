@@ -225,11 +225,11 @@ versions, malformed inputs, explicit retries, export recovery, active claims,
 size limits, directory selection, CLI exit codes, and schema migration.
 No automated test calls an external model.
 
-Verified in the current execution environment: 146 tests in total, 132 passed
+At stage 7, verification in this execution environment covered 146 tests: 132 passed
 and 14 HTTP tests skipped because local TCP/socketpair connections are blocked.
 All 27 stage 7 tests passed. The reference demonstration produced four documents
 and one duplicate; its repeat skipped all five inputs without adding attempts.
 
 Browser/HTTP limitations recorded in [stage 6](06-workspace.md) still apply;
-folder intake itself does not require HTTP or a browser. Stage 8 will add
-Docker packaging and a reproducible end-to-end demonstration.
+folder intake itself does not require HTTP or a browser. [Stage 8](08-delivery.md)
+adds Docker packaging and a reproducible end-to-end demonstration.
