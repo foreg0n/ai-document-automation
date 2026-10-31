@@ -9,3 +9,4 @@ output/
 *.sqlite3
 *.sqlite3-*
 tests/tmp*/
+data/uploads/

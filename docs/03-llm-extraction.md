@@ -1,203 +1,203 @@
-# Этап 3. Извлечение полей счёта через LLM
+# Stage 3. Extracting invoice fields with an LLM
 
-## Что добавлено
+## What was added
 
-Команда `process` соединяет чтение PDF со второго этапа с запросом к модели.
-Результат модели должен содержать ровно пять полей:
+The `process` command connects the PDF reader from stage 2 to a model request.
+The response must contain exactly five fields:
 
-| Поле | Значение |
+| Field | Meaning |
 | --- | --- |
-| `supplier` | Поставщик, выставивший счёт |
-| `invoice_number` | Номер счёта |
-| `invoice_date` | Дата выставления в формате YYYY-MM-DD |
-| `total_amount` | Итоговая сумма строкой, например `"1234.50"` |
-| `currency` | Код валюты, например `"PLN"` |
+| `supplier` | Supplier issuing the invoice |
+| `invoice_number` | Invoice identifier |
+| `invoice_date` | Issue date in YYYY-MM-DD format |
+| `total_amount` | Final total as a string, such as `"1234.50"` |
+| `currency` | Currency code, such as `"PLN"` |
 
-Каждое значение может быть `null`, если его нет или оно неоднозначно.
-Отсутствующая сумма не заменяется нулём и не рассчитывается из других сумм.
+Any value can be `null` when missing or ambiguous.
+A missing total is not replaced with zero or calculated from other amounts.
 
-В текущей версии `process` также запускает проверки этапа 4 и сохраняет
-отдельный отчёт. Подробности: [этап 4](04-validation.md).
+The current `process` command also runs stage 4 checks and saves a separate
+report. See [stage 4](04-validation.md).
 
-Код интеграции готов. Проверки используют настоящие PDF и подставные ответы API.
-Реального вызова модели при разработке не было: для него нужны твой ключ и ID
-модели. Точность извлечения реальной моделью пока не измерена.
+The integration is implemented. Tests use real PDFs and controlled API replies.
+No live model call was made during development: that requires your API key and
+model ID. Real-model extraction accuracy has not yet been measured.
 
-## Проверка без ключа
+## Preview without a key
 
-Из корня проекта:
+From the project root:
 
 ```powershell
 .\.venv\Scripts\python.exe -m document_automation process data/samples --dry-run --model preview-only --overwrite
 ```
 
-`--dry-run` означает «подготовить запрос, но не отправлять его».
-`preview-only` — условное имя для просмотра, а не ID существующей модели.
-`--overwrite` разрешает заменить уже подготовленные запросы.
+`--dry-run` means prepare a request without sending it.
+`preview-only` is a placeholder for previewing, not an actual model ID.
+`--overwrite` allows earlier request previews to be replaced.
 
-В `output/invoices` появятся пять файлов `*.request.json`. Внутри есть пометка
-`mode: "dry_run"`, текст страниц и будущий запрос. Полей, якобы полученных
-от модели, этот режим не создаёт.
+Five `*.request.json` files appear in `output/invoices`. They contain
+`mode: "dry_run"`, page text, and the proposed request.
+This mode does not create fields presented as if a model had generated them.
 
-## Настройка реального запроса
+## Configure a live request
 
-В корне проекта есть `.env.example`. Создай из него `.env`, если этого файла
-ещё нет. В подготовленном рабочем проекте пустой `.env` уже создан.
+The project root contains `.env.example`. Copy it to `.env` if that file does
+not exist. An empty configuration file was already created in the prepared workspace.
 
-Заполни локально:
+Fill in the values locally:
 
 ```dotenv
 LLM_BASE_URL=https://openrouter.ai/api/v1
-LLM_MODEL=ID_ТВОЕЙ_МОДЕЛИ
-LLM_API_KEY=ТВОЙ_КЛЮЧ
+LLM_MODEL=YOUR_MODEL_ID
+LLM_API_KEY=YOUR_API_KEY
 LLM_RESPONSE_FORMAT=json_schema
 LLM_TIMEOUT_SECONDS=60
 ```
 
-Здесь значения модели и ключа — обозначения, которые нужно заменить.
-Укажи точный ID модели из своего аккаунта провайдера. Модель и её конкретный
-endpoint должны поддерживать выбранный формат ответа.
-OpenRouter приведён как пример: `LLM_BASE_URL` можно заменить на корень другого
-совместимого Chat Completions API. Не добавляй к нему `/chat/completions`:
-клиент добавит этот путь сам.
+Replace the model and key placeholders. Use the exact model ID from your
+provider account. Both the model and its endpoint must support the selected
+response format.
 
-Первая проверка с одним PDF:
+OpenRouter is an example configuration. `LLM_BASE_URL` can point to another
+compatible Chat Completions API root. Do not append `/chat/completions`;
+the client adds that path.
+
+Start with one PDF:
 
 ```powershell
 .\.venv\Scripts\python.exe -m document_automation process data/samples/01_invoice_pln.pdf
 ```
 
-Это уже отправляет текст провайдеру и может расходовать баланс API.
-В запрос попадает текст страниц. Имена файлов и эталонные JSON/CSV в него
-не входят. Ключ передаётся в HTTP-заголовке, а не в тексте для модели.
+This sends text to the provider and can incur API charges.
+The request includes page text, without filenames or reference JSON/CSV.
+The key is sent in an HTTP header rather than in the model's text input.
 
-Если endpoint поддерживает только JSON mode, можно явно выбрать:
+For an endpoint that supports JSON mode but not JSON Schema, explicitly select:
 
 ```powershell
 .\.venv\Scripts\python.exe -m document_automation process data/samples/01_invoice_pln.pdf --response-format json_object
 ```
 
-Автоматического переключения формата и повторных запросов нет.
+There is no automatic response-format fallback or request retry.
 
-## load_settings() и read_env_file()
+## load_settings() and read_env_file()
 
-Находятся в `document_automation/config.py`.
+Located in `document_automation/config.py`.
 
-`read_env_file()` читает строки вида `ИМЯ=значение`. Поддерживаются комментарии
-на отдельной строке и значения в парных кавычках. Она не выполняет команды,
-не подставляет переменные, не поддерживает `export` и комментарии после значения.
+`read_env_file()` reads `NAME=value` assignments. It supports full-line comments
+and matching quotes around values. It does not execute commands, expand variables,
+support `export`, or parse inline comments after values.
 
-`load_settings()` собирает настройки с таким приоритетом:
+`load_settings()` applies this precedence:
 
-1. Параметры команды `--model` и `--response-format`.
-2. Переменные окружения.
-3. Значения из `.env`.
+1. CLI options `--model` and `--response-format`.
+2. Environment variables.
+3. Values from `.env`.
 
-Функция проверяет наличие модели и, для реального запуска, ключа API.
-Для `--dry-run` ключ не нужен. Настройки передаются дальше как объект
-`LLMSettings`. У поля ключа стоит `repr=False`, поэтому обычное текстовое
-представление этого объекта не показывает ключ.
+It checks that a model is selected and that a live request has an API key.
+A `--dry-run` needs no key. Settings are passed as an `LLMSettings` object.
+Its key field uses `repr=False`, so the object's normal text representation
+does not display the key.
 
-## invoice_schema() и build_request()
+## invoice_schema() and build_request()
 
-Находятся в `document_automation/invoice.py`.
+Located in `document_automation/invoice.py`.
 
-`invoice_schema()` описывает структуру ответа. Это JSON Schema — описание
-того, какие ключи и типы данных разрешены. Все пять ключей обязательны,
-но их значения могут быть строками или `null`. Лишние ключи запрещены.
+`invoice_schema()` describes the response structure using JSON Schema:
+which keys and value types are allowed. All five keys are required, but each
+value may be a string or `null`. Extra keys are forbidden.
 
-`build_request()` собирает тело HTTP-запроса:
+`build_request()` assembles the HTTP request body:
 
-- `model` — выбранная модель;
-- `messages` — инструкция системы и текст страниц;
-- `response_format` — JSON Schema или JSON mode;
-- `max_tokens` — предел в 2048 токенов ответа;
-- `stream: false` — получить ответ целиком.
+- `model`: selected model;
+- `messages`: system instructions and page text;
+- `response_format`: JSON Schema or JSON mode;
+- `max_tokens`: a 2,048-token completion limit;
+- `stream: false`: receive the complete response.
 
-Токен — единица, на которые модель разбивает текст. Он не равен одному символу
-или слову. Длинный ответ может упереться в лимит; незавершённый ответ мы отклоняем.
+A token is a unit into which a model splits text. It is not necessarily one
+character or word. Long responses can reach the limit; incomplete responses
+are rejected.
 
-В системной инструкции объясняется, что дата счёта отличается от даты оплаты,
-что поставщик отличается от клиента и что отсутствующие данные нельзя угадывать.
-Текст PDF обозначается как данные, а не инструкции. Это направляет поведение
-модели, но не гарантирует правильность её ответа.
+The system instructions distinguish the issue date from the payment deadline
+and the supplier from the customer, and prohibit guessing missing values.
+PDF content is described as data rather than instructions. This guides the
+model but does not guarantee that its answer is correct.
 
-Документы длиннее 50 000 извлечённых символов отклоняются. Автоматического
-обрезания текста нет, иначе можно было бы потерять итог на последней странице.
-Этот предел не гарантирует, что запрос поместится в контекст любой модели.
+Documents exceeding 50,000 extracted characters are rejected. Automatic
+truncation could lose a total on the last page, so it is not performed.
+The character limit does not guarantee a fit within every model's context window.
 
-## request_invoice() и parse_completion()
+## request_invoice() and parse_completion()
 
-Находятся в `document_automation/llm_client.py`.
+Located in `document_automation/llm_client.py`.
 
-`request_invoice()` кодирует тело запроса в UTF-8 и отправляет HTTP POST через
-стандартный модуль `urllib`. Отдельный SDK и новые зависимости не требуются.
+`request_invoice()` encodes the request body as UTF-8 and sends an HTTP POST
+with the standard `urllib` module. No separate SDK or extra dependency is required
+for this client.
 
-Клиент обрабатывает HTTP-ошибки, недоступность сервера, тайм-аут и неверный
-ответ. Сырые тела ошибок не выводятся. При ошибке API пакетная обработка
-останавливается, оставшиеся PDF отмечаются как пропущенные.
+It handles HTTP errors, unreachable servers, timeouts, and invalid responses.
+Raw error bodies are not printed. An API error stops the batch and marks
+remaining PDFs as skipped.
 
-`parse_completion()` достаёт текст ответа из `choices[0].message.content`.
-Она отклоняет незавершённые ответы, отказ модели и запросы инструментов.
-Успешный результат содержит поля, имя модели и доступную статистику токенов.
+`parse_completion()` reads the response text from `choices[0].message.content`.
+It rejects incomplete responses, model refusals, and tool requests.
+A successful result contains the fields, model name, and available token usage.
 
 ## parse_invoice_fields()
 
-Находится в `document_automation/invoice.py`.
+Located in `document_automation/invoice.py`.
 
-Переводит JSON-строку модели в словарь Python и проверяет базовый договор:
+Converts the model's JSON string into a Python dictionary and checks the basic contract:
 
-- ровно пять нужных ключей;
-- значения — непустые строки или `None`, соответствующий JSON `null`;
-- нет повторяющихся ключей, Markdown или постороннего текста;
-- сумма не пришла числом вместо строки.
+- exactly the five required keys;
+- non-empty strings or `None`, corresponding to JSON `null`;
+- no duplicate keys, Markdown, or surrounding commentary;
+- amounts represented as strings rather than numbers.
 
-Например, `"total_amount": "1234.50"` допустимо, а `"total_amount": 1234.5`
-отклоняется. Так точная десятичная запись суммы не теряется при преобразовании
-в число с плавающей точкой.
+For example, `"total_amount": "1234.50"` is accepted, while
+`"total_amount": 1234.5` is rejected. This preserves the exact decimal spelling
+instead of converting it to a binary floating-point number.
 
-Это ещё не проверка правильности данных. Например, строка с несуществующей
-датой пока может пройти проверку типа. Даты, суммы, валюты и причины ручной
-проверки разберём на этапе 4.
+This is not a factual correctness check. A string describing an impossible date
+can pass a type check. Stage 4 adds date, amount, currency, and review-reason checks.
 
 ## process_pdf()
 
-Находится в `document_automation/pipeline.py`.
+Located in `document_automation/pipeline.py`.
 
-Соединяет компоненты: читает PDF, строит запрос, получает поля и сохраняет
-результат. Перед вызовом API проверяет, не заняты ли имена выходных файлов.
-Это помогает избежать лишнего обращения к модели при повторном запуске.
+Connects the components: reads a PDF, builds a request, obtains fields, and saves
+the result. Before contacting the API, it checks for output filename conflicts.
+This helps avoid unnecessary model requests on repeated runs.
 
-Реальный успешный запуск создаёт:
+A successful live run creates:
 
-- `invoice.pdf.fields.json` — только пять полей счёта;
-- `invoice.pdf.meta.json` — имя PDF, число страниц, модель, статистику токенов
-  и предупреждения чтения.
-- `invoice.pdf.validation.json` — отчёт проверки полей из этапа 4.
+- `invoice.pdf.fields.json`: only the five invoice fields;
+- `invoice.pdf.meta.json`: filename, page count, model, token usage, and reader warnings;
+- `invoice.pdf.validation.json`: the stage 4 field-validation report.
 
-В метаданных записывается `validation_status` со значением `passed` или
-`needs_review`. Предупреждения о страницах без текста
-сохраняются, поэтому доступный текст не выдаётся за гарантированно полный счёт.
+Metadata records `validation_status` as `passed` or `needs_review`.
+Textless-page warnings are preserved, so available text is not treated as
+proof that the entire invoice was read.
 
-Существующие результаты сохраняются без `--overwrite`. Выходные файлы
-не записываются одной транзакцией; после ошибки при разрешённой перезаписи
-может потребоваться повторить команду. Не запускай несколько процессов,
-пишущих одновременно в одну папку результатов.
+Existing results are preserved without `--overwrite`. Output files are not
+written in one transaction; an interrupted overwrite may require a repeat run.
+Do not run concurrent processes writing to the same output directory.
 
-## Проверки и границы результата
+## Verification and limits
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 .\.venv\Scripts\python.exe tools/verify_samples.py
 ```
 
-Тесты проверяют чтение настоящего PDF, состав HTTP-запроса, сохранение
-контролируемого ответа API, `null`, настройки, ошибки сети и защиту результатов
-от перезаписи. В тестах внешнее API заменено подставным транспортом: он
-позволяет воспроизводимо вернуть JSON или ошибку без ключа и расходов.
+Tests cover reading a real PDF, request contents, controlled API response saving,
+`null` handling, settings, network errors, and output protection.
+An external API is replaced by a test transport that can reproducibly return
+JSON or errors without a key or API charges.
 
-Это тесты кода интеграции, а не доказательство точности реальной модели.
-Эталонные ответы останутся у отдельного кода оценки и не будут передаваться LLM.
+These tests verify the integration code, not a real model's accuracy.
+Reference answers remain in separate evaluation code and are not sent to the LLM.
 
-Документация API:
+API documentation:
 [Structured Outputs](https://openrouter.ai/docs/guides/features/structured-outputs).

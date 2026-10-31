@@ -1,18 +1,22 @@
-# Этап 5. SQLite, история и точные дубликаты
+# Stage 5. SQLite, history, and exact duplicates
 
-## Что готово
+## What is ready
 
-Результаты `process` теперь сохраняются в SQLite: текст страниц, пять полей,
-модель, статистика токенов и отчёт проверки. Каждый уникальный PDF получает ID.
-Повторный PDF использует сохранённый результат и не вызывает модель снова.
+The `process` command now stores its results in SQLite: page text, five fields,
+model name, token usage, and the validation report. Each unique PDF receives an ID.
+A repeated PDF reuses the stored result without another model call.
 
-SQLite — база данных, хранящая таблицы в одном основном файле. Она уже входит
-в Python через модуль `sqlite3`, поэтому отдельный сервер не нужен.
+SQLite stores tables in a main database file. Python includes it through the
+`sqlite3` module, so no separate database server is needed.
 
-Основная база находится в `data/documents.sqlite3`. Её можно изменить параметром
-`--database`. База и служебные файлы SQLite исключены из Git.
+The main database is `data/documents.sqlite3`. Change it with `--database`.
+The database and SQLite sidecar files are excluded from Git.
 
-## Демонстрация без API
+Stage 6 adds the browser workspace and separate manual revisions.
+The schema upgrades to v2 while preserving original records:
+[stage 6](06-workspace.md).
+
+## Demonstration without an API
 
 ```powershell
 .\.venv\Scripts\python.exe -m tools.demo_storage --as-of 2026-10-31
@@ -20,187 +24,189 @@ SQLite — база данных, хранящая таблицы в одном 
 .\.venv\Scripts\python.exe -m document_automation show 1 --database output/storage-demo.sqlite3
 ```
 
-При первом запуске в новой демонстрационной базе будут четыре документа и
-пять попыток обработки. Пятый PDF — точная копия первого и ссылается на его ID.
-Счёт без суммы сохраняется со статусом проверки `needs_review`.
+On the first run with a new demo database, there are four documents and five
+processing attempts. The fifth PDF is an exact copy of the first and refers to
+its document ID. The invoice without a total retains `needs_review`.
 
-При повторном запуске появятся ещё пять попыток-дубликатов, а количество
-уникальных документов останется равным четырём. Существующая база сохраняется.
+A repeat adds five duplicate attempts, while the unique-document count remains
+four. The existing database is preserved.
 
-Демонстрация использует известные эталонные ответы. Её база помечена
-`reference_fixture`, а реальные запуски используют базу типа `llm`.
-Приложение откажется смешивать эти два вида баз. Это предотвращает попадание
-эталонных ответов в кеш настоящей обработки моделью.
+The demonstration uses known reference answers. Its database is marked
+`reference_fixture`; live runs use an `llm` database.
+The application refuses to mix these kinds of database, keeping reference
+answers out of the real model-result cache.
 
-## Обычный запуск
+## Normal processing
 
-Для нового документа нужны настройки модели и ключ из предыдущего этапа:
+A new document requires the model settings and key from the previous stage:
 
 ```powershell
 .\.venv\Scripts\python.exe -m document_automation process data/samples --as-of 2026-10-31
 ```
 
-Если PDF уже завершён в этой базе, результат доступен без `.env` и ключа.
-Для новых файлов настройки загружаются перед обращением к модели.
-Старые JSON-файлы предыдущих этапов автоматически в SQLite не импортируются.
+If a completed result for the PDF already exists in this database, it is available
+without `.env` or a key. New files load their settings before contacting the model.
+JSON files from earlier stages are not imported automatically.
 
-Просмотр основной базы:
+Inspect the main database:
 
 ```powershell
 .\.venv\Scripts\python.exe -m document_automation history
 .\.venv\Scripts\python.exe -m document_automation show 1
 ```
 
-`history` показывает ID, состояние обработки, статус проверки, исходное имя,
-количество попыток и дубликатов. По умолчанию выводятся последние 20 документов;
-`--limit 50` меняет количество, а `--json` включает JSON-вывод.
+`history` shows the ID, processing state, validation status, original filename,
+attempt count, and duplicate count. It lists the most recent 20 documents by
+default. `--limit 50` changes the count, while `--json` selects JSON output.
 
-`show ID` показывает сохранённые поля, текст, проверку и попытки обработки
-выбранного документа. Эти команды открывают существующую базу для чтения и
-не создают новую базу, если указанный файл отсутствует.
+`show ID` displays the selected document's stored fields, text, validation,
+and attempts. These commands open an existing database for reading.
+They do not create a database when the specified file is missing.
 
-## content_sha256() и снимок PDF
+## content_sha256() and the PDF snapshot
 
-`content_sha256()` находится в `document_automation/storage.py`. Она получает
-байты и вычисляет SHA-256 — отпечаток содержимого из 64 шестнадцатеричных символов.
+`content_sha256()` is in `document_automation/storage.py`.
+It accepts bytes and computes SHA-256, a 64-character hexadecimal content fingerprint.
 
-Название файла в вычислении не участвует. Поэтому `invoice.pdf` и `copy.pdf`
-с одинаковыми байтами имеют одинаковый отпечаток.
+The filename is not part of the calculation. Consequently, `invoice.pdf` and
+`copy.pdf` with identical bytes have identical fingerprints.
 
-В `process_pdf()` исходный PDF читается один раз:
+In `process_pdf()`, the source PDF is read once:
 
 ```python
 content = source.read_bytes()
 digest = content_sha256(content)
 ```
 
-Затем тот же `content` передаётся в `extract_pdf_text()`. Даже если исходный
-файл после этого изменится, отпечаток и обработанный текст относятся к одному
-снимку байтов. Сам PDF в SQLite не архивируется: сохраняются его текст и путь.
+The same `content` is passed to `extract_pdf_text()`. Even if the original file
+changes afterward, hashing and extraction refer to the same byte snapshot.
+SQLite stores the extracted text and original path, not an archive of the PDF itself.
 
-Проверка обнаруживает точные дубликаты содержимого. Изменение метаданных PDF
-тоже меняет байты и отпечаток, хотя документ может выглядеть так же.
-Совпадение номера счёта или внешнего вида здесь не считается дубликатом.
+This check detects exact content duplicates. Changing PDF metadata also changes
+the bytes and hash, even when the document looks the same.
+Matching invoice numbers or visual appearance alone do not count as duplicates.
 
-## Как устроена база
+## Database structure
 
-| Таблица | Что хранит |
+| Table | Contents |
 | --- | --- |
-| `documents` | Одну запись на SHA-256: текст, поля, проверку и состояние |
-| `attempts` | Отдельную запись каждого запуска, повтора, ошибки или дубликата |
-| `store_info` | Служебный тип базы: `llm` или `reference_fixture` |
+| `documents` | One row per SHA-256: text, fields, validation, and processing state |
+| `attempts` | A record for each run, retry, error, or duplicate |
+| `store_info` | Database provenance: `llm` or `reference_fixture` |
 
-Таблица похожа на список записей: строка — одна запись, столбец — её свойство.
-`documents.id` — первичный ключ, то есть уникальный номер документа.
-`attempts.document_id` — внешний ключ, связывающий попытку с документом.
+A table is a collection of records: a row is one record, and a column is one of
+its properties. `documents.id` is the primary key, the document's unique ID.
+`attempts.document_id` is a foreign key linking an attempt to its document.
 
-У `documents.sha256` есть ограничение `UNIQUE`: SQLite не разрешит создать
-две строки с одинаковым отпечатком в одной базе.
+`documents.sha256` has a `UNIQUE` constraint: SQLite will not allow two rows
+with the same fingerprint in one database.
 
-Поля и вложенные отчёты сохраняются как JSON-текст. Сумма `"1234.50"` остаётся
-строкой; в число `float` она не преобразуется. Ключ API методам хранения
-не передаётся. Для ошибок сохраняется имя типа ошибки, а не сырое тело ответа API.
+Fields and nested reports are stored as JSON text. `"1234.50"` remains a string;
+it is not converted to `float`. Storage methods do not receive the API key.
+Errors store the exception type name rather than a raw API error body.
 
 ## DocumentStore.claim()
 
-Метод на короткое время открывает транзакцию и ищет отпечаток в базе.
+Briefly opens a transaction and searches for the fingerprint.
 
-- Если записи нет, создаёт документ и попытку со состоянием `processing`.
-- Если результат уже `completed`, создаёт попытку `duplicate` с тем же ID.
-- Если обработка завершилась ошибкой, позволяет новую попытку с прежним ID.
-- Если другой процесс ещё обрабатывает PDF, возвращает понятную ошибку занятости.
+- If no record exists, it creates a document and attempt in `processing` state.
+- If a result is already `completed`, it adds a `duplicate` attempt with the same ID.
+- If processing failed, it permits another attempt under the existing document ID.
+- If another process is still working on the PDF, it returns a clear busy error.
 
-Транзакция — группа операций, которая либо сохраняется целиком, либо отменяется.
-`BEGIN IMMEDIATE` резервирует запись для изменений, а `commit()` сохраняет
-результат. При ошибке `rollback()` отменяет незавершённые изменения.
+A transaction groups operations that either commit together or are rolled back.
+`BEGIN IMMEDIATE` acquires a write reservation, and `commit()` saves the changes.
+On failure, `rollback()` cancels uncommitted changes.
 
-Запросы используют параметры:
+Queries use parameters:
 
 ```python
 connection.execute("SELECT * FROM documents WHERE sha256 = ?", (digest,))
 ```
 
-Знак `?` обозначает место для данных. Значение передаётся отдельно, поэтому
-его содержимое не становится SQL-командой. Запятая в `(digest,)` создаёт
-кортеж из одного элемента — последовательность параметров запроса.
+The `?` is a placeholder for data. Values are supplied separately, so their
+contents do not become SQL commands. The comma in `(digest,)` creates a
+one-element tuple: the query's parameter sequence.
 
-Транзакция заканчивается до обращения к API: сеть не удерживает блокировку
-SQLite на всё время ожидания модели.
+The transaction ends before the API call. Network waiting therefore does not
+hold a SQLite write lock throughout the model request.
 
-## Резервирование и восстановление
+## Reservations and recovery
 
-У активной обработки есть срок в 15 минут и случайный токен владельца.
-Если процесс прервётся, после истечения срока следующая попытка сможет забрать
-резервирование. Предыдущая незавершённая попытка получит `LeaseExpired`.
+Active processing has a 15-minute lease and a random ownership token.
+After an interrupted process, a later attempt can reclaim an expired lease.
+The earlier unfinished attempt is marked `LeaseExpired`.
 
-`complete()` проверяет токен, поэтому старый процесс не сможет записать
-результат поверх работы нового владельца.
+`complete()` checks the token, preventing an old worker from overwriting
+a result owned by a newer worker.
 
-Это механизм восстановления для локального приложения. Он не гарантирует
-единственное списание API при аварии после отправки запроса или при работе
-процесса дольше срока резервирования. При обычной незавершённой попытке другой
-процесс получает сообщение занятости и не вызывает модель.
+This is a recovery mechanism for the local application. It does not guarantee
+exactly-once API billing after a crash following request submission or when a
+worker runs beyond its lease. While an ordinary active reservation remains
+valid, another worker gets a busy error and does not call the model.
 
-## complete(), fail() и состояние экспорта
+## complete(), fail(), and export state
 
-`complete()` одной транзакцией записывает текст, поля, метаданные и проверку,
-а также завершает попытку. Только затем `process_pdf()` экспортирует JSON-файлы.
+`complete()` saves text, fields, metadata, validation, and the finished attempt
+in one transaction. Only afterward does `process_pdf()` export JSON files.
 
-Если запись файлов не удалась, результат остаётся в SQLite. В истории будет
-завершённая обработка с `export_status: "failed"`. Повтор с `--overwrite`
-восстановит экспорт из базы без нового вызова модели.
+If writing the files fails, the result remains in SQLite. History shows a
+completed extraction with `export_status: "failed"`. Retrying with `--overwrite`
+restores exports from the database without another model call.
 
-`fail()` помечает незавершённую обработку как неуспешную. Она не удаляет
-историю и не превращает уже сохранённый результат в ошибку из-за сбоя экспорта.
-Ошибка обработки допускает новую попытку, а не создаёт ложный готовый дубликат.
+`fail()` marks unfinished processing as unsuccessful. It preserves history and
+does not turn an already committed result into a processing failure merely
+because export failed. A processing error permits a retry rather than creating
+a false completed duplicate.
 
-Состояние `completed` означает завершённую обработку, а не успешную проверку
-всех полей: рядом может быть `validation_status: "needs_review"`.
+`completed` means processing finished. It does not mean all field checks passed:
+the same record can have `validation_status: "needs_review"`.
 
-`DocumentStore` закрывает соединение при выходе из своего `with`-блока.
-Это отличается от стандартного `with sqlite3.connect(...)`, который управляет
-транзакцией, но сам по себе не закрывает соединение. Закрытие освобождает файл
-базы, что особенно заметно в Windows.
+`DocumentStore` closes its connection when its `with` block exits.
+In contrast, the standard `with sqlite3.connect(...)` manages a transaction
+without closing the connection itself. Closing releases the database file,
+which is particularly important on Windows.
 
-## Повторный запуск и JSON-файлы
+## Repeated runs and JSON files
 
-Для дубликата, у которого нет выходных файлов, создаются три экспорта с новым
-входным именем. В метаданных есть `duplicate_of` с ID сохранённого документа.
+For a duplicate without output files, three exports are created under its new
+incoming filename. Metadata includes `duplicate_of`, the stored document ID.
 
-Если хотя бы один файл экспорта уже существует, приложение сохраняет имеющиеся
-файлы и сообщает, что результат взят из SQLite. Доступ к исходному результату
-остаётся через `show ID`.
+If any export file already exists, the application preserves the existing files
+and reports that it reused the SQLite result. The canonical saved result remains
+available through `show ID`.
 
-`--overwrite` заменяет JSON-экспорты из кеша. Он не запускает модель повторно.
-Сохранённые модель, дата проверки и версия правил остаются прежними.
-Для новой локальной проверки используй `validate`; отдельный отчёт не меняет
-историческую запись обработки в базе.
+`--overwrite` replaces JSON exports from the cache. It does not call the model
+again. The original model, validation date, and rules version are preserved.
+For a new local check, use `validate`; its separate report does not change the
+historical processing record in SQLite.
 
-Чтобы явно сравнить другую модель на том же PDF, задай другую базу через
-`--database` и отдельную папку `--output-dir`.
+To deliberately compare another model on the same PDF, choose another
+`--database` and a separate `--output-dir`.
 
-`--dry-run` сохраняет только запрос-превью, без базы и записей-дубликатов.
-Команды `extract` и `validate` тоже сохраняют своё отдельное поведение.
+`--dry-run` writes only a request preview, without database or duplicate records.
+`extract` and `validate` also retain their separate behavior.
 
 ## ProcessResult
 
-`process_pdf()` возвращает объект `ProcessResult` с путями экспортов,
-предупреждениями, отчётом, ID документа и признаком дубликата.
-CLI читает эти свойства и выводит `OK`, `NEEDS_REVIEW`, `DUPLICATE` или `PREVIEW`.
+`process_pdf()` returns a `ProcessResult` object containing output paths,
+warnings, a validation report, a document ID, and a duplicate flag.
+The CLI reads those properties and prints `OK`, `NEEDS_REVIEW`, `DUPLICATE`,
+or `PREVIEW`.
 
-Поскольку повторный результат тоже может требовать ручной проверки,
-`DUPLICATE` не означает `passed`. Код завершения 3 для таких результатов
-сохраняется с четвёртого этапа; ошибка операции имеет приоритет и даёт код 1.
+A reused result can still require manual review: `DUPLICATE` does not imply
+`passed`. Exit code 3 retains its stage 4 meaning for such results;
+an operation error takes precedence and returns code 1.
 
-## Проверки
+## Verification
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 .\.venv\Scripts\python.exe tools/verify_samples.py
 ```
 
-Тесты используют реальные файлы SQLite, проверяют повторное открытие базы,
-точные дубликаты, два соединения, потерю владельца, откат транзакции, повторы
-после ошибок и восстановление экспорта. Проверяется и общий сценарий пяти
-PDF с четырьмя подставными ответами API, затем повтор без новых обращений.
-Внешний LLM в тестах не вызывается.
+Tests use real SQLite files and check reopening, exact duplicates, two connections,
+ownership loss, transaction rollback, retries after errors, and export recovery.
+They also cover processing five PDFs with four controlled API replies, followed
+by a repeat with no additional model requests.
+Tests do not call an external LLM.

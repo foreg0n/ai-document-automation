@@ -12,7 +12,7 @@ from typing import Callable
 
 DEFAULT_DATABASE = Path("data/documents.sqlite3")
 APPLICATION_ID = 0x41494441
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 LEASE_SECONDS = 900
 SCHEMA = """
 CREATE TABLE store_info (
@@ -49,6 +49,18 @@ CREATE TABLE attempts (
 );
 CREATE INDEX attempts_document_id ON attempts(document_id);
 """
+REVIEWS_SCHEMA = """
+CREATE TABLE reviews (
+    id INTEGER PRIMARY KEY,
+    document_id INTEGER NOT NULL REFERENCES documents(id),
+    fields_json TEXT NOT NULL,
+    validation_json TEXT NOT NULL,
+    confirmed INTEGER NOT NULL CHECK (confirmed IN (0, 1)),
+    note TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX reviews_document_id ON reviews(document_id, id);
+"""
 
 
 class StorageError(Exception):
@@ -57,6 +69,10 @@ class StorageError(Exception):
 
 class DocumentBusyError(StorageError):
     """Another worker owns an unexpired reservation for this content."""
+
+
+class ReviewConflictError(StorageError):
+    """The review was changed in another tab before this edit was saved."""
 
 
 @dataclass(frozen=True)
@@ -104,7 +120,7 @@ class DocumentStore:
                 # One script makes schema initialization atomic as well.
                 try:
                     self.connection.executescript(
-                        "BEGIN IMMEDIATE;\n" + SCHEMA
+                        "BEGIN IMMEDIATE;\n" + SCHEMA + REVIEWS_SCHEMA
                         + f"\nPRAGMA application_id = {APPLICATION_ID};"
                         + f"\nPRAGMA user_version = {SCHEMA_VERSION};"
                     )
@@ -114,7 +130,7 @@ class DocumentStore:
                     self.connection.rollback()
                     raise
                 version, application = SCHEMA_VERSION, APPLICATION_ID
-            if version != SCHEMA_VERSION or application != APPLICATION_ID:
+            if version not in (1, SCHEMA_VERSION) or application != APPLICATION_ID:
                 raise StorageError("Unsupported database format or schema version.")
             row = self.connection.execute("SELECT input_kind FROM store_info WHERE id=1").fetchone()
             if row is None:
@@ -122,6 +138,17 @@ class DocumentStore:
             self.input_kind = row[0]
             if not readonly and self.input_kind != input_kind:
                 raise StorageError("Reference-fixture and LLM results must use separate databases.")
+            if version == 1 and not readonly:
+                try:
+                    self.connection.executescript(
+                        "BEGIN IMMEDIATE;\n" + REVIEWS_SCHEMA
+                        + f"\nPRAGMA user_version = {SCHEMA_VERSION};\nCOMMIT;"
+                    )
+                except Exception:
+                    self.connection.rollback()
+                    raise
+                version = SCHEMA_VERSION
+            self.schema_version = version
         except (sqlite3.Error, OSError) as exc:
             self.close()
             raise StorageError(f"Cannot open the SQLite database: {exc}") from exc
@@ -244,6 +271,15 @@ class DocumentStore:
             record["attempts"] = [dict(item) for item in self.connection.execute(
                 "SELECT * FROM attempts WHERE document_id=? ORDER BY id", (document_id,),
             )]
+            record["reviews"] = []
+            if self.schema_version >= 2:
+                for item in self.connection.execute("SELECT * FROM reviews WHERE document_id=? ORDER BY id", (document_id,)):
+                    review = dict(item)
+                    review["fields"] = json.loads(review.pop("fields_json"))
+                    review["validation"] = json.loads(review.pop("validation_json"))
+                    review["confirmed"] = bool(review["confirmed"])
+                    record["reviews"].append(review)
+            record["latest_review"] = record["reviews"][-1] if record["reviews"] else None
             return record
         except (sqlite3.Error, ValueError) as exc:
             raise StorageError(f"Cannot read stored document: {exc}") from exc
@@ -261,3 +297,48 @@ class DocumentStore:
             return [{**dict(row), "input_kind": self.input_kind} for row in rows]
         except sqlite3.Error as exc:
             raise StorageError(f"Cannot read document history: {exc}") from exc
+
+    def save_review(
+        self, document_id: int, *, fields: dict, validation: dict,
+        confirmed: bool, note: str, expected_revision: int,
+    ) -> int:
+        fields_json = json.dumps(fields, ensure_ascii=False, allow_nan=False)
+        validation_json = json.dumps(validation, ensure_ascii=False, allow_nan=False)
+        with self.transaction():
+            row = self.connection.execute("SELECT state FROM documents WHERE id=?", (document_id,)).fetchone()
+            if row is None or row["state"] != "completed":
+                raise StorageError("Only completed documents can be reviewed.")
+            latest = self.connection.execute("SELECT COALESCE(MAX(id),0) FROM reviews WHERE document_id=?", (document_id,)).fetchone()[0]
+            if latest != expected_revision:
+                raise ReviewConflictError("This document was edited in another tab. Refresh before saving.")
+            cursor = self.connection.execute(
+                "INSERT INTO reviews(document_id, fields_json, validation_json, confirmed, note, created_at) VALUES(?, ?, ?, ?, ?, ?)",
+                (document_id, fields_json, validation_json, int(confirmed), note,
+                 self.clock().astimezone(timezone.utc).isoformat()),
+            )
+            return cursor.lastrowid
+
+    def review_rows(self) -> list[dict]:
+        """Small summaries, excluding large page text; one row per document."""
+        try:
+            rows = self.connection.execute(
+                "SELECT d.id, d.source_file, d.state, d.created_at, d.fields_json, d.validation_json, "
+                "r.id AS review_id, r.fields_json AS review_fields, r.validation_json AS review_validation, "
+                "r.confirmed, r.note FROM documents d LEFT JOIN reviews r ON r.id="
+                "(SELECT MAX(id) FROM reviews WHERE document_id=d.id) ORDER BY d.id DESC"
+            ).fetchall()
+            result = []
+            for row in rows:
+                item = dict(row)
+                original = item.pop("fields_json")
+                reviewed = item.pop("review_fields")
+                validation = item.pop("review_validation") or item.pop("validation_json")
+                item.pop("validation_json", None)
+                item["fields"] = json.loads(reviewed or original) if reviewed or original else None
+                item["validation"] = json.loads(validation) if validation else None
+                item["review_status"] = "confirmed" if item["confirmed"] else "draft" if item["review_id"] else "unreviewed"
+                item["input_kind"] = self.input_kind
+                result.append(item)
+            return result
+        except (sqlite3.Error, ValueError) as exc:
+            raise StorageError(f"Cannot read review history: {exc}") from exc

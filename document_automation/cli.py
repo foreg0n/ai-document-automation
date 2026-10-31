@@ -245,7 +245,34 @@ def main(argv: list[str] | None = None) -> int:
     show = subparsers.add_parser("show", help="Show one stored document and its attempts")
     show.add_argument("document_id", type=int)
     show.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+    serve = subparsers.add_parser("serve", help="Open the local upload, review, history and CSV workspace")
+    serve.add_argument("--database", type=Path, help="SQLite database (defaults depend on demo mode)")
+    serve.add_argument("--port", type=int, default=8000)
+    serve.add_argument("--demo", action="store_true", help="Use a separate reference-fixture workspace without API calls")
+    serve.add_argument("--uploads", type=Path, default=Path("data/uploads"))
+    serve.add_argument("--env-file", type=Path, default=Path(".env"))
     args = parser.parse_args(argv)
+    if args.command == "serve":
+        if not 1 <= args.port <= 65535:
+            parser.error("Port must be between 1 and 65535.")
+        try:
+            import uvicorn
+            from .web import create_app
+            database = args.database or (Path("output/ui-demo.sqlite3") if args.demo else DEFAULT_DATABASE)
+            if args.demo:
+                from tools.demo_storage import main as seed_demo
+                if seed_demo(["--database", str(database)]) != 0:
+                    return 1
+            app = create_app(database, demo=args.demo, uploads=args.uploads, env_file=args.env_file)
+            print(f"Workspace: http://127.0.0.1:{args.port} ({'reference demo' if args.demo else 'live model workspace'})")
+            uvicorn.run(app, host="127.0.0.1", port=args.port, proxy_headers=False, access_log=False)
+        except ImportError:
+            print("ERROR: Install web dependencies with python -m pip install -r requirements.txt", file=sys.stderr)
+            return 1
+        except (OSError, StorageError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+        return 0
     if args.command in {"history", "show"}:
         return run_history(args)
     if args.command == "validate":

@@ -3,11 +3,33 @@
 A portfolio project built in eight small stages: invoice upload, text extraction,
 structured AI extraction, validation, human review, storage, and CSV export.
 
-**Current stage: 5 / 8 - SQLite persistence and exact-content duplicate detection.**
+**Current stage: 6 / 8 - local upload, history, human review, and CSV workspace.**
 
 The stage 3 integration is implemented and tested with controlled API responses.
 A live provider run still needs your API key and model ID; no real-model
 accuracy results are claimed.
+
+## Open the local workspace
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m document_automation serve --demo --port 8765
+```
+
+Open **http://127.0.0.1:8765/** in your browser. Keep the terminal running;
+press Ctrl+C to stop the server. The demo uses `output/ui-demo.sqlite3`, reference
+answers, and the included PDF samples. No API key or model calls are used in
+demo mode. Existing review edits survive a restart.
+
+For your own documents, run without `--demo` after configuring `.env`:
+
+```powershell
+.\.venv\Scripts\python.exe -m document_automation serve --port 8765
+```
+
+The live workspace uses `data/documents.sqlite3`; new unique PDFs use the
+configured model, while duplicates reuse stored results. Use `--database` to
+choose another database, or `--port` if your chosen port is already in use.
 
 ## Quick start (Windows / PowerShell)
 
@@ -19,8 +41,8 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m document_automation extract data/samples
 ```
 
-No activation or execution-policy changes are needed. The only third-party
-dependency is the pinned PDFium binding in `requirements.txt`.
+No activation or execution-policy changes are needed. `requirements.txt` pins
+the PDFium reader, FastAPI/Starlette, and Uvicorn for the local web server.
 No API keys, LLM calls, or paid services are used in stages 1-2.
 After dependency installation, text extraction runs locally without network access.
 
@@ -278,6 +300,56 @@ answers explicitly, makes no model calls, and marks its database as
 `llm` database; this keeps fixture answers out of the real result cache.
 Database files and temporary test directories are ignored by Git.
 
+## Stage 6: upload, human review, and CSV
+
+The browser workspace includes drag-and-drop or file selection, a searchable
+and paginated document history, rule issues, extracted page text, a PDF preview,
+five editable fields, review notes, revision history, and CSV downloads.
+The interface and stage walkthroughs are in English.
+
+Select a PDF up to 20 MB, then click **Process PDF**. Uploaded PDFs are archived
+under `data/uploads/<sha256>/<filename>` and processed by the existing pipeline.
+Only one PDF job parses at a time because PDFium is not thread-safe. The local
+in-memory queue accepts up to ten active/queued jobs. Jobs are not a durable
+task queue; saved documents and reviews are persistent.
+
+In demo mode, uploads accept only copies of the included PDFs and reuse their
+reference records. Unknown demo uploads are rejected rather than simulated as
+model results. The live and reference-fixture databases remain separate.
+
+**Save draft** records a new manual revision without changing the original LLM
+fields. **Confirm review** also requires checking the source acknowledgement.
+If rule issues remain, a note is required; confirmation does not erase those
+issues. Editing a confirmed document into a new draft removes its confirmation
+from the current export until that latest revision is confirmed again.
+An outdated browser tab receives a conflict instead of overwriting a newer edit.
+
+The CSV menu defaults to **Confirmed documents**, using the latest confirmed
+manual values. **All completed documents** also includes drafts and unreviewed
+results. Both scopes contain one row per unique document and include review
+status, validation status, and input provenance. Missing values are blank;
+CSV is UTF-8 with BOM. Formula-like cell values are escaped for spreadsheet use.
+Export goes through the browser download; no external service is involved.
+
+Database schema v1 is upgraded transactionally to v2 by adding an append-only
+`reviews` table. Existing documents, attempts, and original field JSON remain
+intact. The CLI can still read v1 databases without modifying them; opening the
+workspace or another write connection performs the migration.
+
+The server binds to `127.0.0.1` and is intended for one local workspace. It uses
+a process session cookie and CSRF token; API keys remain in server-side settings.
+The API exposes document IDs, not arbitrary filesystem paths. Before serving a
+PDF, it verifies that the source bytes still match the saved SHA-256. A moved
+or changed source can still be reviewed through its saved text.
+
+Stage 6 verification in this execution environment: 105 checks passed;
+14 TestClient HTTP checks were skipped because loopback TCP/socketpair creation
+is restricted. The review, queue, migration, CSV, route functions, and session
+guards were also tested directly without sockets. JavaScript syntax and DOM
+IDs were checked. Chrome/Edge could not launch successfully for screenshot QA,
+so full HTTP/browser and visual verification remain to be run on an unrestricted
+desktop. The HTTP tests stay enabled automatically where local TCP works.
+
 ## Errors and limitations
 
 - Missing, unreadable, damaged, and password-locked inputs produce an error.
@@ -305,6 +377,7 @@ basic model-response contract check.
 
 ```powershell
 .\.venv\Scripts\python.exe tools/verify_samples.py
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
@@ -317,6 +390,10 @@ currencies, missing values, reader warnings, reference dates, and offline rechec
 Stage 5 tests use real SQLite files to check persistence, unique hashes, separate
 connections, expired reservations, rollback, export recovery, retry history,
 fixture isolation, and four controlled API calls for five sample inputs.
+Stage 6 checks cover schema migration, review revisions and conflicts, original
+field preservation, confirmation, CSV scopes and escaping, uploads, queue limits,
+and source PDF integrity. HTTP tests need the development-only `httpx` package;
+they check loopback availability before initializing Windows asyncio.
 No tests call an external LLM. They do not measure a real model's accuracy.
 
 ## Run stage 1
@@ -345,17 +422,23 @@ documents.
 | `document_automation/validation.py` | Deterministic rules, statuses and review reasons |
 | `document_automation/validation_files.py` | Offline rechecks of saved fields and companion warnings |
 | `document_automation/storage.py` | SQLite schema, reservations, result persistence and history |
+| `document_automation/workspace.py` | Upload queue, review operations, PDF integrity and CSV |
+| `document_automation/web.py` | FastAPI routes, localhost session and static frontend |
+| `document_automation/web_static/` | Browser interface: HTML, CSS, vanilla JavaScript |
 | `document_automation/__main__.py` | Entry point for `python -m document_automation` |
 | `requirements.txt` | Pinned PDF reader dependency |
+| `requirements-dev.txt` | Test client dependency plus runtime requirements |
 | `tests/test_text_extraction.py` | Automated stage 2 behavior checks |
 | `tests/test_invoice_extraction.py` | Offline stage 3 integration checks |
 | `tests/test_validation.py` | Stage 4 rule and offline CLI checks |
 | `tests/test_storage.py` | Real SQLite persistence and concurrency checks |
+| `tests/test_web_workspace.py` | Workspace operations, migration and HTTP checks |
 | `.env.example` | Configuration template without credentials |
 | `output/text/` | Generated extraction results; ignored by Git |
 | `output/invoices/` | Stage 3 previews or invoice fields and metadata; ignored by Git |
 | `output/validation/` | Recheck reports; ignored by Git |
 | `data/documents.sqlite3` | Live result database; ignored by Git |
+| `data/uploads/` | Managed uploaded PDFs; ignored by Git |
 | `data/samples/` | Five text-based, synthetic invoice PDFs |
 | `data/ground_truth.json` | Reference field values and expected special cases |
 | `data/ground_truth.csv` | The same reference values in a spreadsheet-friendly table |
@@ -364,11 +447,12 @@ documents.
 | `tools/verify_samples.py` | Dataset integrity checks |
 | `tools/demo_validation.py` | Explicit reference-data validation demo without an LLM |
 | `tools/demo_storage.py` | Separate reference-data SQLite and duplicate demonstration |
-| `docs/01-sample-data.md` | Russian stage 1 walkthrough |
-| `docs/02-text-extraction.md` | Russian stage 2 walkthrough and function explanations |
-| `docs/03-llm-extraction.md` | Russian stage 3 setup and function explanations |
-| `docs/04-validation.md` | Russian stage 4 rules, reports and function explanations |
-| `docs/05-storage.md` | Russian SQLite, hash and history walkthrough |
+| `docs/01-sample-data.md` | English stage 1 walkthrough |
+| `docs/02-text-extraction.md` | English stage 2 walkthrough and function explanations |
+| `docs/03-llm-extraction.md` | English stage 3 setup and function explanations |
+| `docs/04-validation.md` | English stage 4 rules, reports and function explanations |
+| `docs/05-storage.md` | English SQLite, hash and history walkthrough |
+| `docs/06-workspace.md` | English web workspace and manual-review walkthrough |
 
 ## Dataset
 
@@ -396,7 +480,7 @@ extraction model.
 3. LLM extraction into the five-field JSON format - implemented; live provider verification pending configuration.
 4. Deterministic validation with clear review reasons - complete.
 5. SQLite persistence and file-content duplicate detection - complete.
-6. Upload, review and history UI with CSV export.
+6. Upload, review and history UI with CSV export - implemented; HTTP/browser QA limited by execution environment.
 7. Automatic intake from an incoming folder.
 8. Docker, reproducible demo and measured portfolio results.
 

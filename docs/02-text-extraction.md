@@ -1,17 +1,16 @@
-# Этап 2. Извлечение текста из PDF
+# Stage 2. Extracting text from PDFs
 
-## Что готово
+## What is ready
 
-Теперь приложение принимает PDF или папку через командную строку, читает
-текстовый слой каждой страницы и сохраняет результат в TXT и JSON.
+The application accepts a PDF or folder through the command line, reads each
+page's text layer, and saves the result as TXT and JSON.
 
-Обработка выполняется локально. На этом этапе ключ API и модель не нужны.
-Эталонные ответы из `ground_truth.json` и `ground_truth.csv` код чтения
-не открывает.
+Processing runs locally. This stage needs no API key or model.
+The reader never opens `ground_truth.json` or `ground_truth.csv`.
 
-## Запуск
+## Run the stage
 
-В терминале из корня проекта:
+From a terminal in the project root:
 
 ```powershell
 python -m venv .venv
@@ -19,57 +18,56 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m document_automation extract data/samples
 ```
 
-Если окружение уже создано и зависимость установлена, достаточно последней
-команды. В `output/text` появятся десять файлов: TXT и JSON для каждого PDF.
+If the environment and dependency are already installed, only the last command
+is needed. The `output/text` folder receives ten files: TXT and JSON for each PDF.
 
-Повторный запуск с заменой предыдущих результатов:
+To repeat the run and replace previous results:
 
 ```powershell
 .\.venv\Scripts\python.exe -m document_automation extract data/samples --overwrite
 ```
 
-Один документ и отдельная папка для результата:
+To process one document into a separate output folder:
 
 ```powershell
 .\.venv\Scripts\python.exe -m document_automation extract data/samples/01_invoice_pln.pdf --output-dir output/one-invoice
 ```
 
-Приложение по умолчанию отказывается перезаписывать существующие результаты.
-Опция `--overwrite` разрешает замену. Для разных входных папок с одинаковыми
-именами PDF выбирай разные `--output-dir`.
+The application protects existing results by default. `--overwrite` explicitly
+allows replacement. Use different `--output-dir` folders when different input
+folders contain PDFs with the same filenames.
 
-## Как проходит обработка
+## Processing flow
 
-1. `__main__.py` вызывает `main()`.
-2. `main()` разбирает аргументы терминала через стандартную библиотеку `argparse`.
-3. `collect_pdf_files()` собирает список входных PDF.
-4. `extract_pdf_text()` получает текст каждой страницы.
-5. `save_extraction()` сохраняет TXT и JSON.
-6. `main()` показывает количество успешных и неуспешных файлов.
+1. `__main__.py` calls `main()`.
+2. `main()` parses terminal arguments with the standard `argparse` library.
+3. `collect_pdf_files()` builds the input PDF list.
+4. `extract_pdf_text()` reads the text of each page.
+5. `save_extraction()` writes TXT and JSON.
+6. `main()` reports how many files succeeded or failed.
 
-Разделение на функции позволяет позже использовать тот же читатель PDF
-в веб-приложении, не вызывая командную строку.
+Splitting the work into functions allows the same PDF reader to be used later
+in the web application without invoking the command line.
 
 ## collect_pdf_files(source)
 
-Находится в `document_automation/cli.py`.
+Located in `document_automation/cli.py`.
 
-Если передан файл, функция проверяет расширение и возвращает список из одного
-пути. Если передана папка, собирает её PDF в список и сортирует по имени.
-Вложенные папки не просматриваются.
+If given a file, the function checks its extension and returns a one-item list.
+If given a folder, it collects its PDFs and sorts them by name.
+It does not search subfolders.
 
-`Path` представляет путь к файлу или папке. Он умеет проверять существование
-пути, получать расширение и строить новый путь через оператор `/`.
+`Path` represents a file or folder path. It can check whether a path exists,
+read its extension, and build a new path with the `/` operator.
 
-Выражение `path.suffix.lower() == ".pdf"` принимает и `.pdf`, и `.PDF`.
+The expression `path.suffix.lower() == ".pdf"` accepts both `.pdf` and `.PDF`.
 
 ## extract_pdf_text(path)
 
-Находится в `document_automation/pdf_text.py`.
+Located in `document_automation/pdf_text.py`.
 
-Это основная функция этапа. Она открывает документ через
-`pypdfium2.PdfDocument`, проходит все страницы и вызывает
-`get_text_bounded()` у их текстового представления.
+This stage's main function opens a document with `pypdfium2.PdfDocument`,
+visits every page, and calls `get_text_bounded()` on its text representation.
 
 ```python
 with pdfium.PdfDocument(path) as reader:
@@ -77,129 +75,123 @@ with pdfium.PdfDocument(path) as reader:
         ...
 ```
 
-`len(reader)` возвращает количество страниц. Индексы Python начинаются с нуля,
-поэтому в результате пользовательский номер страницы равен `index + 1`.
+`len(reader)` returns the page count. Python indexes start at zero, so the
+page number shown in the result is `index + 1`.
 
-PDFium использует память и файловые ресурсы вне обычных объектов Python.
-`with` и `closing()` гарантируют вызов `close()`, в том числе при ошибке.
+PDFium uses native memory and file resources outside ordinary Python objects.
+`with` and `closing()` ensure that `close()` is called, including when an error occurs.
 
-После чтения функция приводит окончания строк к `\n` и убирает пробелы
-по краям всей страницы через `strip()`. Даты, суммы, разделители и подписи
-она не преобразует.
+After reading a page, the function normalizes line endings to `\n` and removes
+whitespace around the entire page with `strip()`. It preserves dates, amounts,
+separators, and labels.
 
-Например, в EUR-документе остаются `21.10.2026` и `980,00 EUR`.
-Преобразовывать их в формат будущих полей будем в следующих этапах.
+For example, the EUR invoice retains `21.10.2026` and `980,00 EUR`.
+Later stages convert them to the normalized invoice-field format.
 
-## PageText и ExtractedDocument
+## PageText and ExtractedDocument
 
-Это классы данных, объявленные через `@dataclass`. Python сам создаёт
-для них конструктор, чтобы нам не писать одинаковый служебный код вручную.
+These are data classes declared with `@dataclass`. Python generates their
+constructors, avoiding repetitive setup code.
 
-`PageText` хранит номер страницы и её текст.
+`PageText` stores a page number and its text.
 
-`ExtractedDocument` хранит имя исходного файла, страницы и предупреждения.
-Его свойство `text` соединяет тексты страниц через пустую строку:
+`ExtractedDocument` stores the source filename, pages, and warnings.
+Its `text` property joins page texts with a blank line between pages:
 
 ```python
 return "\n\n".join(page.text for page in self.pages)
 ```
 
-Свойство объявлено через `@property`, поэтому его читают как
-`document.text`, без круглых скобок.
+The property uses `@property`, so callers read `document.text` without parentheses.
 
-`frozen=True` запрещает менять поля объекта после создания. Страницы и
-предупреждения хранятся в кортежах — последовательностях, состав которых
-тоже нельзя поменять. Это помогает передавать результат между этапами
-без случайных изменений.
+`frozen=True` prevents field reassignment after the object is created.
+Pages and warnings are tuples: sequences whose contents cannot be changed.
+This helps prevent accidental changes while passing results between stages.
 
-Метод `to_dict()` переводит результат в словарь, пригодный для JSON.
-Номера страниц сохраняются отдельно: позже они помогут найти данные в PDF.
+`to_dict()` converts the result into a JSON-compatible dictionary.
+Page numbers remain separate so later stages can locate information in the PDF.
 
 ## save_extraction(document, output_dir)
 
-Находится в `document_automation/cli.py`.
+Located in `document_automation/cli.py`.
 
-Создаёт папку и записывает два файла в UTF-8:
+Creates the output folder and writes two UTF-8 files:
 
-- `01_invoice_pln.pdf.txt` — весь извлечённый текст;
-- `01_invoice_pln.pdf.json` — текст, страницы и служебные сведения.
+- `01_invoice_pln.pdf.txt`: all extracted text;
+- `01_invoice_pln.pdf.json`: text, numbered pages, and metadata.
 
-`json.dumps()` превращает словарь в JSON-строку.
-`ensure_ascii=False` оставляет кириллицу и другие буквы читаемыми.
-`indent=2` добавляет отступы.
+`json.dumps()` converts a dictionary into a JSON string.
+`ensure_ascii=False` keeps Cyrillic and other Unicode characters readable.
+`indent=2` adds indentation.
 
-Перед записью проверяются оба имени результата. Режим открытия `"x"`
-создаёт только новый файл и отказывается затирать существующий.
-Если запись новых файлов завершилась ошибкой, функция убирает созданные
-этой попыткой файлы. Ранее существовавшие файлы не удаляются.
+Both destination names are checked before writing. File mode `"x"` creates
+only new files and refuses to overwrite existing ones. If writing new files
+fails, the function removes files created by that attempt. Earlier results
+are preserved.
 
-При `--overwrite` используется режим `"w"`. Он заменяет содержимое файла.
-Два выходных файла не являются одной транзакцией: если при разрешённой
-перезаписи прервётся запись, повтори команду после устранения ошибки.
+With `--overwrite`, mode `"w"` replaces file contents. The two output files
+are not a single transaction: if an overwrite is interrupted, repeat the command
+after resolving the problem.
 
 ## main(argv)
 
-Координирует функции и обрабатывает ожидаемые ошибки через `try / except`.
+Coordinates the functions and handles expected errors with `try / except`.
 
-`argv` — список аргументов. При обычном запуске `argparse` получает их
-из терминала. В тестах мы можем передать список прямо в `main()`.
+`argv` is an argument list. During normal execution, `argparse` reads arguments
+from the terminal. Tests can pass a list directly to `main()`.
 
-Ошибка одного PDF выводится в `stderr`, поток сообщений об ошибках.
-Остальные документы продолжают обрабатываться.
+An individual PDF error is printed to `stderr`, the error-output stream.
+The remaining documents continue processing.
 
-Коды завершения:
+Exit codes:
 
-- `0` — все PDF обработаны; предупреждения всё ещё нужно проверить;
-- `1` — хотя бы один входной файл или запись результата завершились ошибкой;
-- `2` — неверно указаны аргументы командной строки.
+- `0`: all PDFs were processed; any warnings still need checking;
+- `1`: at least one input or output operation failed;
+- `2`: command-line arguments were invalid.
 
-`raise SystemExit(main())` в `__main__.py` передаёт этот код операционной
-системе. В PowerShell последнюю такую величину можно посмотреть через
-`$LASTEXITCODE`.
+`raise SystemExit(main())` in `__main__.py` passes that code to the operating
+system. In PowerShell, `$LASTEXITCODE` shows the last process exit code.
 
-## Пустые страницы и сканы
+## Empty pages and scans
 
-PDF может хранить текст, изображения или оба варианта.
+A PDF can contain text, images, or both.
 
-Если текст не удалось получить ни с одной страницы, приложение сообщает об
-ошибке и необходимости OCR для скана. OCR — распознавание текста на картинке;
-в этот этап оно не входит.
+If no page yields text, the application reports an error and explains that a
+scan needs OCR. OCR recognizes text in images; it is not part of this stage.
 
-Если текст есть только на части страниц, результат сохраняется, а каждая
-страница без текста получает предупреждение и остаётся в списке `pages`.
-По одному отсутствию текста нельзя уверенно определить, что страница является
-сканом: она может быть пустой или содержать неподдерживаемые объекты.
+If only some pages yield text, the available text is saved. Every textless page
+receives a warning and remains in `pages`. Missing extracted text alone does
+not prove that a page is a scan: it may be blank or contain unsupported objects.
 
-PDF с уже существующим OCR-слоем можно прочитать, но ошибки самого OCR этот
-код не обнаруживает. Сложные таблицы могут давать неудобный порядок текста.
+An existing OCR text layer can be read, but this code does not detect errors
+made by the OCR system. Complex tables may produce an inconvenient reading order.
 
-Документ, требующий пароль для открытия, возвращает понятную ошибку.
-Ввод пароля через CLI пока не предусмотрен.
+A PDF that requires an opening password returns a clear error.
+Password input is not supported by the CLI at this stage.
 
-## Проверка
+## Verification
 
 ```powershell
 .\.venv\Scripts\python.exe tools/verify_samples.py
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-Тесты используют настоящие PDF. Они проверяют видимые значения разных макетов,
-порядок нескольких страниц, страницы без текста, повреждённые файлы,
-кириллицу в путях, сохранение TXT/JSON и работу CLI.
+Tests use real PDFs. They check visible values across layouts, page order,
+textless pages, damaged files, Unicode paths, TXT/JSON output, and CLI behavior.
 
-Совпадение текста у первого и пятого образца тоже проверяется.
-Автоматическое обнаружение дубликатов добавим на этапе 5.
+They also verify that the first and fifth samples yield identical text.
+Automatic duplicate detection is introduced in stage 5.
 
-Это проверка чтения текста. Она ещё не измеряет точность извлечения пяти
-полей счёта, поскольку модели в проекте пока нет.
+These checks verify text reading. They do not measure the five-field extraction
+accuracy of an LLM; that belongs to later stages.
 
-## Следующий этап
+## Next stage
 
-На этапе 3 модель получит извлечённый текст и инструкцию вернуть пять полей:
-`supplier`, `invoice_number`, `invoice_date`, `total_amount`, `currency`.
+In stage 3, the model receives extracted text and an instruction to return five fields:
+`supplier`, `invoice_number`, `invoice_date`, `total_amount`, and `currency`.
 
-JSON текущего этапа хранит исходный текст и сведения о страницах.
-Это отдельный формат, который не заменяет будущий результат модели.
+This stage's JSON stores source text and page information. It is a separate
+format from the model's invoice-field response.
 
-Документация используемой библиотеки:
+Library documentation:
 [pypdfium2 Python API](https://pypdfium2.readthedocs.io/en/stable/python_api.html).

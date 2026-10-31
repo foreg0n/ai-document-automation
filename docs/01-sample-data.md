@@ -1,161 +1,162 @@
-# Этап 1. Примеры документов и правильные ответы
+# Stage 1. Sample documents and reference answers
 
-## Что готово
+## What is ready
 
-В `data/samples` лежат пять PDF. Текст в них записан как текстовые объекты PDF,
-а не как изображение. Все названия компаний и документы учебные.
+The `data/samples` folder contains five PDFs. Their content is stored as PDF
+text objects rather than images. All company names and documents are synthetic.
 
-| Файл | Сценарий | Сумма | Валюта |
+| File | Scenario | Amount | Currency |
 | --- | --- | --- | --- |
-| 01_invoice_pln.pdf | Обычный счёт, дата YYYY-MM-DD | 1234.50 | PLN |
-| 02_invoice_eur.pdf | Другой макет, дата DD.MM.YYYY, сумма с запятой | 980.00 | EUR |
-| 03_invoice_usd.pdf | Третий макет, дата с названием месяца, отдельная дата оплаты | 2750.00 | USD |
-| 04_invoice_missing_total.pdf | Итоговая сумма отсутствует | null | PLN |
-| 05_invoice_duplicate.pdf | Точная копия первого файла | 1234.50 | PLN |
+| 01_invoice_pln.pdf | Standard invoice, YYYY-MM-DD date | 1234.50 | PLN |
+| 02_invoice_eur.pdf | Different layout, DD.MM.YYYY date, decimal comma | 980.00 | EUR |
+| 03_invoice_usd.pdf | Third layout, month-name date, separate payment deadline | 2750.00 | USD |
+| 04_invoice_missing_total.pdf | Final total is missing | null | PLN |
+| 05_invoice_duplicate.pdf | Exact copy of the first file | 1234.50 | PLN |
 
-Сначала нам нужны заранее известные ответы. Иначе будет трудно понять,
-правильно ли модель прочитала документ. Такой набор ответов называют
-**ground truth**, то есть эталонные данные.
+We need known answers before testing extraction. Otherwise, it would be hard to
+tell whether a model read a document correctly. This set of reference answers is
+called **ground truth**.
 
-## Как запустить
+## Run the stage
 
-Открой папку проекта в VS Code, затем открой Terminal → New Terminal.
+Open the project folder in VS Code, then select Terminal > New Terminal.
 
 ```powershell
 python tools/generate_samples.py
 python tools/verify_samples.py
 ```
 
-Первая команда пересоздаёт учебные PDF, JSON и CSV. Вторая проверяет целостность
-набора. При успешном запуске она выводит две строки PASS.
+The first command recreates the synthetic PDFs, JSON, and CSV. The second checks
+dataset integrity. A successful check prints two PASS lines.
 
-Ключи и платные вызовы модели на этом этапе не нужны.
+This stage needs no API keys or paid model calls.
 
-## Где находятся исходные значения
+## Where the source values live
 
-В начале `tools/generate_samples.py` есть список `INVOICES`.
-Каждый элемент списка — словарь Python, описывающий один учебный счёт.
+The `INVOICES` list is near the beginning of `tools/generate_samples.py`.
+Each item is a Python dictionary describing one synthetic invoice.
 
-Например, `invoice["supplier"]` получает название поставщика,
-а `invoice["total_amount"]` — сумму. Значение `None` означает, что данных нет.
-При сохранении в JSON оно превращается в `null`.
+For example, `invoice["supplier"]` returns the supplier name, and
+`invoice["total_amount"]` returns the amount. `None` means a value is missing.
+When saved as JSON, it becomes `null`.
 
-`layout` и `services` управляют внешним видом образца. Они не входят в пять
-полей, которые должна извлекать будущая система.
+The `layout` and `services` entries control the sample's appearance. They are
+not part of the five fields that the extraction system will return.
 
-Исходные значения используются для создания PDF и эталона. Это удобно для
-воспроизводимых учебных примеров, но ещё не доказывает качество извлечения:
-самого извлечения и модели на этом этапе нет.
+The source values generate both the PDFs and the reference answers. This makes
+the examples reproducible, but does not demonstrate extraction quality:
+this stage does not implement extraction or call a model.
 
-## Главные функции генератора
+## Main generator functions
 
 ### format_amount()
 
-Получает сумму, валюту и название макета. Возвращает строку для печати в PDF.
+Accepts an amount, currency, and layout name. Returns a string to print in a PDF.
 
-Одна и та же сумма может выглядеть как `1,234.50 PLN` или `980,00 EUR`.
-Эталон при этом хранит единый формат: `"1234.50"` и `"980.00"`.
+Displayed amounts may look like `1,234.50 PLN` or `980,00 EUR`. The reference
+answers use one normalized representation: `"1234.50"` and `"980.00"`.
 
-Используем `Decimal`, потому что он представляет десятичные суммы точно.
-В JSON суммы пока записаны строками. При дальнейших вычислениях будем
-преобразовывать их в `Decimal`, а не в `float`.
+We use `Decimal` because it represents decimal amounts exactly. JSON amounts
+are stored as strings. Later calculations should convert them to `Decimal`
+rather than `float`.
 
-Если суммы нет, функция печатает `Not provided`. Она не заменяет её нулём.
+If the amount is missing, the function prints `Not provided`. It does not
+replace the missing value with zero.
 
 ### render_invoice()
 
-Берёт данные одного счёта и рисует PDF: заголовок, поставщика, дату, услуги,
-валюту, итоговую сумму и пометку об учебном документе.
+Takes one invoice's data and draws its PDF: heading, supplier, date, services,
+currency, final total, and synthetic-document notice.
 
-У функции три варианта макета. Это помогает нам позже проверить, что код
-извлечения не зависит от одного расположения текста.
+The function supports three layouts. They let us check later that extraction
+does not depend on a single arrangement of text.
 
-В третьем документе есть две даты: выставления счёта и оплаты.
-Правильный ответ для `invoice_date` — именно дата выставления.
+The third document contains both an issue date and a payment deadline.
+The correct `invoice_date` is the issue date.
 
-В документе без суммы также нет цен отдельных услуг. Поэтому модель должна
-вернуть `null`: вычислить или угадать отсутствующий итог по документу нельзя.
+The incomplete document also omits individual service prices. The model should
+return `null`: the missing total cannot be calculated or guessed from its content.
 
 ### sha256_file()
 
-Читает байты файла и вычисляет SHA-256 — строку из 64 шестнадцатеричных символов.
+Reads the file bytes and computes SHA-256, a string of 64 hexadecimal characters.
 
-Она зависит от содержимого, а не от названия. Переименование файла не меняет
-его отпечаток. В нашем наборе первый и пятый PDF имеют одинаковые байты и SHA-256.
+The fingerprint depends on content, not the filename. Renaming a file leaves
+its fingerprint unchanged. The first and fifth PDFs in this dataset contain
+identical bytes and have the same SHA-256.
 
-Позже такой отпечаток пригодится для поиска точных дубликатов.
-Два визуально одинаковых PDF с разными метаданными могут иметь разные хеши:
-поиск таких похожих документов — отдельная будущая задача.
+This fingerprint will support exact-duplicate detection. Two PDFs that look
+identical can still have different hashes if their metadata differs.
+Detecting visually similar documents is a separate task.
 
 ### build_samples()
 
-Создаёт папку `data/samples`, рисует четыре разных документа и копирует первый
-через `shutil.copyfile()`. Копирование гарантирует точное совпадение байтов.
+Creates `data/samples`, draws four distinct documents, and copies the first one
+with `shutil.copyfile()`. Copying guarantees a byte-for-byte duplicate.
 
-Для каждого файла функция составляет запись: имя, сценарий, SHA-256,
-ожидаемые поля, список отсутствующих полей и ссылку на оригинал дубликата.
+For each file, the function builds a record containing its name, scenario,
+SHA-256, expected fields, missing-field list, and any duplicate's original filename.
 
-`FIELD_NAMES` перечисляет пять целевых полей. Выражение
-`{field: invoice[field] for field in FIELD_NAMES}` собирает из исходного словаря
-новый словарь только с этими пятью полями.
+`FIELD_NAMES` lists the five target fields. The expression
+`{field: invoice[field] for field in FIELD_NAMES}` builds a new dictionary
+containing only those five fields from the source dictionary.
 
 ### write_ground_truth()
 
-Записывает полученные записи в два файла.
+Writes the records to two files.
 
-- `ground_truth.json` удобен для кода: он сохраняет вложенную структуру и `null`.
-- `ground_truth.csv` удобно открыть как таблицу. В нём отсутствующая сумма
-  представлена пустой ячейкой, а не текстом `null`.
+- `ground_truth.json` is useful in code: it preserves nested structure and `null`.
+- `ground_truth.csv` is convenient for spreadsheet viewing. A missing amount is
+  an empty cell rather than the text `null`.
 
-CSV сохраняется в UTF-8 с BOM, чтобы Excel на Windows легче распознал кодировку.
+The CSV uses UTF-8 with BOM to help Excel on Windows recognize its encoding.
 
-Поле `duplicate_of` и список `expected_missing_fields` нужны для проверки
-поведения системы. Это служебные данные, а не дополнительные поля извлечения.
+The `duplicate_of` field and `expected_missing_fields` list describe expected
+system behavior. They are evaluation metadata, not extra extraction fields.
 
 ### main()
 
-Вызывает `build_samples()`, передаёт результат в `write_ground_truth()`
-и печатает, что создано.
+Calls `build_samples()`, passes its result to `write_ground_truth()`, and
+prints what was created.
 
-Конструкция `if __name__ == "__main__":` запускает `main()`, когда файл
-вызван командой `python tools/generate_samples.py`. При импорте файла
-другим модулем генерация сама не начнётся.
+The `if __name__ == "__main__":` condition runs `main()` when the file is
+started with `python tools/generate_samples.py`. Importing the module does
+not automatically generate documents.
 
-## Что делает fixture_pdf.py
+## What fixture_pdf.py does
 
-Это небольшой вспомогательный модуль только для создания учебных PDF.
-Его не будем использовать для чтения загруженных документов.
+This small helper only creates synthetic PDFs. It is not used to read uploaded
+documents.
 
-Класс `PdfPage` собирает команды рисования:
+The `PdfPage` class collects drawing commands:
 
-- `text()` добавляет строку, размер шрифта, цвет и координаты;
-- `rect()` добавляет цветной прямоугольник;
-- `line()` добавляет разделитель;
-- `save()` упаковывает команды и шрифты в одностраничный PDF.
+- `text()` adds text, font size, color, and coordinates;
+- `rect()` adds a colored rectangle;
+- `line()` adds a divider;
+- `save()` packages the commands and fonts into a one-page PDF.
 
-`escape_pdf_text()` обрабатывает обратный слеш и скобки, у которых в PDF
-есть специальное значение. Генератор поддерживает только ASCII-текст.
-Для этих пяти английских образцов этого достаточно; это не ограничение
-будущего парсера документов.
+`escape_pdf_text()` handles backslashes and parentheses, which have special
+meaning in PDF strings. The generator supports ASCII text only. That is enough
+for these five English samples; it is not a limitation of the document reader.
 
-`Path(__file__).resolve().parents[1]` находит корень проекта относительно
-скрипта. Поэтому скрипты не привязаны к моему или твоему абсолютному пути.
+`Path(__file__).resolve().parents[1]` locates the project root relative to the
+script. The scripts therefore do not depend on a particular absolute user path.
 
-## Что проверяет verify_samples.py
+## What verify_samples.py checks
 
-Проверка сверяет количество и состав сценариев, имена файлов и пять полей,
-форматы дат и сумм, допустимые валюты, отсутствие суммы в нужном случае,
-хеши файлов, точное совпадение дубликата и согласованность JSON с CSV.
+The checker verifies the scenario counts, filenames, five fields, date and
+amount formats, supported currencies, deliberately missing total, file hashes,
+exact duplicate, and JSON/CSV consistency.
 
-Она не измеряет точность LLM и не является универсальным PDF-парсером.
+It does not measure LLM accuracy and is not a general-purpose PDF parser.
 
-## Как это будет работать дальше
+## How later stages use the dataset
 
-На втором этапе отдельный компонент прочитает PDF и вернёт текст.
-На третьем этапе модель получит только этот текст и инструкцию о пяти полях.
+Stage 2 adds a component that reads a PDF and returns its text.
+In stage 3, a model receives that text and instructions for extracting five fields.
 
-Эталонные JSON и CSV модели передавать нельзя. Они останутся у проверяющего
-кода, который сравнит полученный ответ с правильными значениями.
+Do not pass the reference JSON or CSV to the model. Evaluation code keeps those
+answers separate and compares the model's output with them.
 
-Пять образцов нужны для первых проверок во время разработки. Для выводов
-о качестве на реальных счетах позже расширим набор документов.
+The five samples support initial development checks. A larger dataset will be
+needed to assess extraction quality on real invoices.
