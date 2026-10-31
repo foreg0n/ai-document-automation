@@ -22,6 +22,7 @@ from document_automation.invoice import (
 )
 from document_automation.llm_client import APIError, MAX_RESPONSE_BYTES, parse_completion, request_invoice
 from document_automation.pdf_text import ExtractedDocument, PageText, extract_pdf_text
+from document_automation.storage import DocumentStore
 
 ROOT = Path(__file__).resolve().parents[1]
 SAMPLES = ROOT / "data" / "samples"
@@ -74,6 +75,7 @@ class InvoiceExtractionTests(unittest.TestCase):
             code = main([
                 "process", str(source), "--output-dir", str(self.output),
                 "--env-file", str(self.env_file), "--as-of", "2026-10-30", *options,
+                "--database", str(self.work / "results.sqlite3"),
             ])
         return code, stdout.getvalue(), stderr.getvalue()
 
@@ -221,6 +223,7 @@ class InvoiceExtractionTests(unittest.TestCase):
         report_file = self.output / metadata["validation_report"]
         self.assertEqual(json.loads(report_file.read_text(encoding="utf-8"))["validation"]["status"], "passed")
         self.assertNotIn(SECRET, stdout + stderr + json.dumps(metadata) + json.dumps(fields))
+        self.assertNotIn(SECRET.encode(), (self.work / "results.sqlite3").read_bytes())
 
     def test_missing_total_in_controlled_reply_stays_null(self):
         self.fake_reply(completion({**FIELDS, "total_amount": None}))
@@ -238,6 +241,7 @@ class InvoiceExtractionTests(unittest.TestCase):
         self.assertEqual(len(list(self.output.glob("*.request.json"))), 5)
         self.assertFalse(list(self.output.glob("*.fields.json")))
         self.assertFalse(list(self.output.glob("*.validation.json")))
+        self.assertFalse((self.work / "results.sqlite3").exists())
         preview = json.loads((self.output / "01_invoice_pln.pdf.request.json").read_text(encoding="utf-8"))
         self.assertEqual(preview["mode"], "dry_run")
         self.assertEqual(preview["request_body"]["model"], "preview-model")
@@ -249,7 +253,7 @@ class InvoiceExtractionTests(unittest.TestCase):
         self.assertNotIn(SECRET, content + stdout + stderr)
         self.opener.open.assert_not_called()
 
-    def test_missing_key_stops_before_pdf_reading_and_network(self):
+    def test_missing_key_stops_before_export_and_network(self):
         self.env_file.write_text("LLM_MODEL=test\n", encoding="utf-8")
         code, _, stderr = self.run_cli(SAMPLES)
         self.assertEqual(code, 1)
@@ -355,6 +359,89 @@ class InvoiceExtractionTests(unittest.TestCase):
         self.assertIn("--overwrite", stderr)
         self.opener.open.assert_not_called()
         self.assertEqual(report.read_text(encoding="utf-8"), "earlier report")
+
+    def test_renamed_duplicate_reuses_result_without_reading_credentials(self):
+        self.fake_reply(completion())
+        self.assertEqual(self.run_cli(SAMPLES / "01_invoice_pln.pdf")[0], 0)
+        self.env_file.write_text("invalid configuration", encoding="utf-8")
+        code, stdout, stderr = self.run_cli(SAMPLES / "05_invoice_duplicate.pdf", "--as-of", "2020-01-01")
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("DUPLICATE", stdout)
+        self.opener.open.assert_called_once()
+        metadata = json.loads((self.output / "05_invoice_duplicate.pdf.meta.json").read_text(encoding="utf-8"))
+        self.assertEqual(metadata["duplicate_of"], 1)
+        self.assertEqual(metadata["original_source_file"], "01_invoice_pln.pdf")
+        cached_report = json.loads((self.output / "05_invoice_duplicate.pdf.validation.json").read_text(encoding="utf-8"))
+        self.assertEqual(cached_report["validation"]["reference_date"], "2026-10-30")
+        with DocumentStore(self.work / "results.sqlite3", readonly=True) as store:
+            self.assertEqual(len(store.history()), 1)
+            self.assertEqual(store.history()[0]["duplicates"], 1)
+
+    def test_repeat_preserves_existing_exports_and_explicit_overwrite_uses_cache(self):
+        self.fake_reply(completion())
+        self.assertEqual(self.run_cli(SAMPLES / "01_invoice_pln.pdf")[0], 0)
+        fields = self.output / "01_invoice_pln.pdf.fields.json"
+        fields.write_text("keep my local export", encoding="utf-8")
+        code, stdout, stderr = self.run_cli(SAMPLES / "01_invoice_pln.pdf")
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("existing JSON exports were kept", stdout)
+        self.assertEqual(fields.read_text(encoding="utf-8"), "keep my local export")
+        self.assertEqual(self.run_cli(SAMPLES / "01_invoice_pln.pdf", "--overwrite")[0], 0)
+        self.assertEqual(json.loads(fields.read_text(encoding="utf-8")), FIELDS)
+        self.opener.open.assert_called_once()
+
+    def test_changed_bytes_under_same_filename_create_a_new_document(self):
+        path = self.work / "invoice.pdf"
+        shutil.copyfile(SAMPLES / "01_invoice_pln.pdf", path)
+        self.fake_reply(completion())
+        self.assertEqual(self.run_cli(path)[0], 0)
+        shutil.copyfile(SAMPLES / "02_invoice_eur.pdf", path)
+        self.assertEqual(self.run_cli(path, "--overwrite")[0], 0)
+        self.assertEqual(self.opener.open.call_count, 2)
+        with DocumentStore(self.work / "results.sqlite3", readonly=True) as store:
+            self.assertEqual(len(store.history()), 2)
+
+    def test_export_failure_keeps_committed_result_and_retry_needs_no_model_call(self):
+        self.fake_reply(completion())
+        with patch("document_automation.pipeline._write_outputs", side_effect=OSError("disk write failed")):
+            self.assertEqual(self.run_cli(SAMPLES / "01_invoice_pln.pdf")[0], 1)
+        with DocumentStore(self.work / "results.sqlite3", readonly=True) as store:
+            stored = store.get(1)
+            self.assertEqual(stored["state"], "completed")
+            self.assertEqual(stored["attempts"][0]["export_status"], "failed")
+        self.env_file.write_text("", encoding="utf-8")
+        code, _, stderr = self.run_cli(SAMPLES / "01_invoice_pln.pdf")
+        self.assertEqual(code, 0, stderr)
+        self.opener.open.assert_called_once()
+        self.assertTrue((self.output / "01_invoice_pln.pdf.fields.json").is_file())
+
+    def test_failed_api_attempt_is_retried_and_not_treated_as_completed_duplicate(self):
+        self.opener.open.side_effect = URLError("unavailable")
+        self.assertEqual(self.run_cli(SAMPLES / "01_invoice_pln.pdf")[0], 1)
+        self.fake_reply(completion())
+        code, stdout, stderr = self.run_cli(SAMPLES / "01_invoice_pln.pdf")
+        self.assertEqual(code, 0, stderr)
+        self.assertNotIn("DUPLICATE ", stdout)
+        self.assertEqual(self.opener.open.call_count, 2)
+        with DocumentStore(self.work / "results.sqlite3", readonly=True) as store:
+            self.assertEqual([item["state"] for item in store.get(1)["attempts"]], ["failed", "completed"])
+
+    def test_five_file_batch_calls_api_four_times_and_reuses_review_results_later(self):
+        def reply(request, **kwargs):
+            fields = {**FIELDS, "total_amount": None} if "Not provided" in request.data.decode("utf-8") else FIELDS
+            return io.BytesIO(json.dumps(completion(fields)).encode("utf-8"))
+        self.opener.open.side_effect = reply
+        code, stdout, stderr = self.run_cli(SAMPLES)
+        self.assertEqual(code, 3, stderr)
+        self.assertIn("Duplicates reused: 1", stdout)
+        self.assertEqual(self.opener.open.call_count, 4)
+        self.env_file.write_text("", encoding="utf-8")
+        code, stdout, stderr = self.run_cli(SAMPLES)
+        self.assertEqual(code, 3, stderr)
+        self.assertIn("Duplicates reused: 5", stdout)
+        self.assertEqual(self.opener.open.call_count, 4)
+        with DocumentStore(self.work / "results.sqlite3", readonly=True) as store:
+            self.assertEqual(len(store.history()), 4)
 
 
 if __name__ == "__main__":

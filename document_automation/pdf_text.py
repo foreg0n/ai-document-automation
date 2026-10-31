@@ -39,12 +39,12 @@ class ExtractedDocument:
         }
 
 
-def extract_pdf_text(path: Path) -> ExtractedDocument:
+def extract_pdf_text(path: Path, *, content: bytes | None = None) -> ExtractedDocument:
     """Read all pages; reject unreadable, password-locked, and textless PDFs."""
     path = Path(path)
-    if not path.exists():
+    if content is None and not path.exists():
         raise TextExtractionError(f"File not found: {path}")
-    if not path.is_file():
+    if content is None and not path.is_file():
         raise TextExtractionError(f"Expected a PDF file: {path}")
     if path.suffix.lower() != ".pdf":
         raise TextExtractionError(f"Only .pdf files are supported: {path.name}")
@@ -52,7 +52,8 @@ def extract_pdf_text(path: Path) -> ExtractedDocument:
     pages = []
     warnings = []
     try:
-        with pdfium.PdfDocument(path) as reader:
+        # A supplied snapshot makes hashing and extraction use identical bytes.
+        with pdfium.PdfDocument(path if content is None else content) as reader:
             if len(reader) == 0:
                 raise TextExtractionError("The PDF contains no pages.")
             for index in range(len(reader)):

@@ -3,7 +3,7 @@
 A portfolio project built in eight small stages: invoice upload, text extraction,
 structured AI extraction, validation, human review, storage, and CSV export.
 
-**Current stage: 4 / 8 - deterministic field validation and review reasons.**
+**Current stage: 5 / 8 - SQLite persistence and exact-content duplicate detection.**
 
 The stage 3 integration is implemented and tested with controlled API responses.
 A live provider run still needs your API key and model ID; no real-model
@@ -110,10 +110,11 @@ variables; environment variables take precedence over `.env`.
 ```
 
 A live run sends document text to the configured provider and can incur API
-charges. The default is one request per PDF, with no automatic retries.
+charges. A new unique PDF makes one request, with no automatic retries;
+completed byte-for-byte duplicates reuse the stored result.
 Use a single PDF for your first live check before processing the whole folder.
 
-Successful live runs save three files under `output/invoices/`:
+Successful live results are committed to SQLite and exported as three files under `output/invoices/`:
 
 - `invoice.pdf.fields.json`: exactly five nullable string fields.
 - `invoice.pdf.meta.json`: source filename, page count, model, available token
@@ -144,6 +145,8 @@ Malformed, duplicate-key, truncated, refused, and tool-call responses are reject
 Output conflicts are checked before contacting the API. `--overwrite` explicitly
 allows replacing previous results. As in stage 2, the output files are not a
 single transaction: a failure during overwrite can require rerunning the command.
+In stage 5 the database result is committed before exporting, so an export retry
+can reuse that result without another model call.
 Do not run concurrent commands writing to the same output directory.
 
 Inputs above 50,000 extracted characters are rejected rather than silently
@@ -209,6 +212,72 @@ This creates five reports in `output/validation-demo/`, marked
 needs review. The duplicate passes these field rules because duplicate detection
 belongs to stage 5. This demonstration does not run or evaluate a model.
 
+## Stage 5: SQLite and duplicates
+
+Live `process` runs use `data/documents.sqlite3` by default. Change this with
+`--database PATH`. The database contains extracted page text, the five fields,
+model/usage metadata, the original validation report, SHA-256, source paths,
+and an attempt history. Amounts remain decimal strings. SQLite is included with
+Python; no extra package or database server is needed.
+
+```powershell
+.\.venv\Scripts\python.exe -m document_automation history
+.\.venv\Scripts\python.exe -m document_automation show 1
+```
+
+These commands read an existing database without loading `.env` or calling an
+API. `history --json` returns JSON; `history --limit 50` changes the default
+20-document limit (maximum 1000). `show ID` includes fields, text, validation,
+and the document's attempts. Neither command creates a missing database.
+
+Deduplication uses the SHA-256 of the same byte snapshot used for text extraction.
+Renaming the file does not change the hash. Editing PDF metadata or other bytes
+does change it, even if the pages look identical. Invoice numbers and visually
+similar documents are not used for duplicate detection.
+
+`documents` has one row per hash; `attempts` records new runs, failures, retries,
+and duplicates. A completed result is reused before API settings are loaded,
+including a result whose validation status is `needs_review`.
+Failed processing can be retried and does not count as a completed duplicate.
+`--dry-run`, `extract`, and standalone `validate` do not write to this database.
+Existing JSON results from earlier stages are not automatically imported.
+
+For a duplicate, missing exports can be created under the incoming filename.
+If any of its export files already exists, the default keeps the existing
+exports and reports use of the database result. `--overwrite` replaces the
+exports from the cached result; it does not request another model response.
+The original model, validation date, and rules version are preserved.
+Use `validate` for a new local check. To deliberately try another model on the
+same bytes, choose a separate `--database` and `--output-dir` for that experiment.
+
+Short SQLite transactions reserve a unique hash before calling the API. Another
+worker is refused while that document is processing. After an interrupted run,
+a reservation can be reclaimed after 15 minutes; the previous worker's ownership
+token cannot overwrite the new result. The transaction is not held during the
+network request. This lease is a local recovery mechanism, not a guarantee of
+exactly-once API billing across crashes or unusually long-running workers.
+
+Results are committed before JSON exports. Attempt history distinguishes a
+completed extraction with a failed export from a failed extraction.
+Re-export a saved result with `--overwrite` after fixing a write problem.
+The database stores extracted text and the original PDF path, not a PDF archive.
+
+### Offline storage demonstration
+
+```powershell
+.\.venv\Scripts\python.exe -m tools.demo_storage --as-of 2026-10-31
+.\.venv\Scripts\python.exe -m document_automation history --database output/storage-demo.sqlite3
+.\.venv\Scripts\python.exe -m document_automation show 1 --database output/storage-demo.sqlite3
+```
+
+On a new demo database, the five samples create four documents and one duplicate
+attempt. A repeat creates no new documents and records five duplicate attempts.
+The missing-total record retains `needs_review`. This demo reads reference
+answers explicitly, makes no model calls, and marks its database as
+`reference_fixture`. It cannot be used by live `process`, which requires an
+`llm` database; this keeps fixture answers out of the real result cache.
+Database files and temporary test directories are ignored by Git.
+
 ## Errors and limitations
 
 - Missing, unreadable, damaged, and password-locked inputs produce an error.
@@ -228,7 +297,7 @@ CLI arguments. An operation error takes precedence over exit code `3`.
 For `extract`, exit `0` still permits text-reader warnings. A successful
 `--dry-run` returns `0` without claiming invoice validation has passed.
 In `extract`, a failed file does not stop the rest of a batch. In `process`,
-API/network errors stop the batch to avoid repeating failing requests.
+API, configuration, or storage errors stop the batch to avoid repeating failing requests.
 No new invoice fields are saved for an input that fails extraction or the
 basic model-response contract check.
 
@@ -245,6 +314,9 @@ Stage 3 tests use controlled API replies to exercise request serialization,
 configuration, JSON parsing, null handling, HTTP errors, and end-to-end saving.
 Stage 4 tests cover calendar boundaries, exact decimal strings, supported
 currencies, missing values, reader warnings, reference dates, and offline rechecks.
+Stage 5 tests use real SQLite files to check persistence, unique hashes, separate
+connections, expired reservations, rollback, export recovery, retry history,
+fixture isolation, and four controlled API calls for five sample inputs.
 No tests call an external LLM. They do not measure a real model's accuracy.
 
 ## Run stage 1
@@ -272,15 +344,18 @@ documents.
 | `document_automation/pipeline.py` | PDF-to-LLM processing and result persistence |
 | `document_automation/validation.py` | Deterministic rules, statuses and review reasons |
 | `document_automation/validation_files.py` | Offline rechecks of saved fields and companion warnings |
+| `document_automation/storage.py` | SQLite schema, reservations, result persistence and history |
 | `document_automation/__main__.py` | Entry point for `python -m document_automation` |
 | `requirements.txt` | Pinned PDF reader dependency |
 | `tests/test_text_extraction.py` | Automated stage 2 behavior checks |
 | `tests/test_invoice_extraction.py` | Offline stage 3 integration checks |
 | `tests/test_validation.py` | Stage 4 rule and offline CLI checks |
+| `tests/test_storage.py` | Real SQLite persistence and concurrency checks |
 | `.env.example` | Configuration template without credentials |
 | `output/text/` | Generated extraction results; ignored by Git |
 | `output/invoices/` | Stage 3 previews or invoice fields and metadata; ignored by Git |
 | `output/validation/` | Recheck reports; ignored by Git |
+| `data/documents.sqlite3` | Live result database; ignored by Git |
 | `data/samples/` | Five text-based, synthetic invoice PDFs |
 | `data/ground_truth.json` | Reference field values and expected special cases |
 | `data/ground_truth.csv` | The same reference values in a spreadsheet-friendly table |
@@ -288,10 +363,12 @@ documents.
 | `tools/fixture_pdf.py` | Dependency-free PDF drawing helper for stage 1 fixtures |
 | `tools/verify_samples.py` | Dataset integrity checks |
 | `tools/demo_validation.py` | Explicit reference-data validation demo without an LLM |
+| `tools/demo_storage.py` | Separate reference-data SQLite and duplicate demonstration |
 | `docs/01-sample-data.md` | Russian stage 1 walkthrough |
 | `docs/02-text-extraction.md` | Russian stage 2 walkthrough and function explanations |
 | `docs/03-llm-extraction.md` | Russian stage 3 setup and function explanations |
 | `docs/04-validation.md` | Russian stage 4 rules, reports and function explanations |
+| `docs/05-storage.md` | Russian SQLite, hash and history walkthrough |
 
 ## Dataset
 
@@ -318,7 +395,7 @@ extraction model.
 2. CLI for extracting text from text-based PDFs - complete.
 3. LLM extraction into the five-field JSON format - implemented; live provider verification pending configuration.
 4. Deterministic validation with clear review reasons - complete.
-5. SQLite persistence and file-content duplicate detection.
+5. SQLite persistence and file-content duplicate detection - complete.
 6. Upload, review and history UI with CSV export.
 7. Automatic intake from an incoming folder.
 8. Docker, reproducible demo and measured portfolio results.

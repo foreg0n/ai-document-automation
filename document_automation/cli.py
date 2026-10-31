@@ -10,6 +10,7 @@ from .invoice import InvoiceFormatError
 from .llm_client import APIError
 from .pdf_text import ExtractedDocument, TextExtractionError, extract_pdf_text
 from .pipeline import process_pdf
+from .storage import DEFAULT_DATABASE, DocumentStore, StorageError
 from .validation import ValidationReport
 from .validation_files import collect_field_files, validate_saved_fields
 
@@ -118,25 +119,38 @@ def run_saved_validation(args: argparse.Namespace) -> int:
 
 
 def run_invoice_extraction(files: list[Path], args: argparse.Namespace) -> int:
+    store = None
     try:
         settings = load_settings(
             args.env_file, model=args.model, response_format=args.response_format,
-            require_api_key=not args.dry_run,
-        )
-    except (ConfigurationError, OSError, UnicodeError) as exc:
+            require_api_key=False,
+        ) if args.dry_run else None
+        if not args.dry_run:
+            store = DocumentStore(args.database)
+        return run_invoice_batch(files, args, settings, store)
+    except (ConfigurationError, StorageError, OSError, UnicodeError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
+    finally:
+        if store is not None:
+            store.close()
+
+
+def run_invoice_batch(files, args, settings, store) -> int:
     if args.dry_run:
         print("DRY RUN: request previews only; no API calls or invoice-field results.")
-    succeeded = failed = review = 0
+    succeeded = failed = review = duplicates = 0
     reference_date = args.as_of or date.today()
     for path in files:
         try:
-            outputs, warnings, report = process_pdf(
+            result = process_pdf(
                 path, settings, args.output_dir,
                 dry_run=args.dry_run, overwrite=args.overwrite, reference_date=reference_date,
+                store=store, settings_loader=lambda: load_settings(
+                    args.env_file, model=args.model, response_format=args.response_format,
+                ),
             )
-        except APIError as exc:
+        except (APIError, ConfigurationError, StorageError) as exc:
             failed += 1
             print(f"ERROR {path.name}: {exc} Batch stopped; no automatic retries.", file=sys.stderr)
             break
@@ -146,21 +160,52 @@ def run_invoice_extraction(files: list[Path], args: argparse.Namespace) -> int:
             continue
         succeeded += 1
         label = "PREVIEW" if args.dry_run else "OK"
+        report = result.report
         if report is not None and report.requires_review:
             label = "NEEDS_REVIEW"
             review += 1
+        if result.duplicate:
+            duplicates += 1
+            label = "DUPLICATE " + (report.status.upper() if report else "")
         print(f"{label} {path.name}")
+        if result.document_id is not None:
+            print(f"  Stored document #{result.document_id}")
+        if result.duplicate and not result.outputs:
+            print("  Reused SQLite result; existing JSON exports were kept.")
         if report is not None:
             print_review_reasons(report)
-        for output in outputs:
+        for output in result.outputs:
             print(f"  {output}")
-        for warning in warnings:
+        for warning in result.warnings:
             print(f"WARNING {path.name}: {warning}", file=sys.stderr)
     skipped = len(files) - succeeded - failed
     print(f"Processed {len(files)} PDF(s): {succeeded} succeeded, {failed} failed, {skipped} skipped.")
     if not args.dry_run:
         print(f"Validation: {succeeded - review} passed, {review} need review.")
+        print(f"Duplicates reused: {duplicates}. Database: {args.database}")
     return 1 if failed or skipped else 3 if review else 0
+
+
+def run_history(args: argparse.Namespace) -> int:
+    try:
+        with DocumentStore(args.database, readonly=True) as store:
+            if args.command == "show":
+                print(json.dumps(store.get(args.document_id), indent=2, ensure_ascii=False))
+            else:
+                rows = store.history(args.limit)
+                if args.json:
+                    print(json.dumps(rows, indent=2, ensure_ascii=False))
+                else:
+                    print(f"Database: {args.database} ({store.input_kind})")
+                    if not rows:
+                        print("No stored documents.")
+                    for row in rows:
+                        print(f"#{row['id']} | {row['state']} | {row['validation_status'] or '-'} | "
+                              f"{row['source_file']} | attempts={row['attempts']} | duplicates={row['duplicates']}")
+    except (StorageError, OSError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -186,13 +231,23 @@ def main(argv: list[str] | None = None) -> int:
     process.add_argument("--response-format", choices=("json_schema", "json_object"))
     process.add_argument("--dry-run", action="store_true", help="Save request previews without contacting the API")
     process.add_argument("--overwrite", action="store_true", help="Replace previous outputs")
+    process.add_argument("--database", type=Path, default=DEFAULT_DATABASE, help="SQLite result database")
     process.add_argument("--as-of", type=parse_reference_date, help="Validation reference date YYYY-MM-DD (default: local computer date)")
     validate = subparsers.add_parser("validate", help="Validate saved fields locally; no API calls")
     validate.add_argument("source", type=Path, help="JSON fields file or folder of *.fields.json files")
     validate.add_argument("--output-dir", type=Path, default=Path("output/validation"))
     validate.add_argument("--overwrite", action="store_true", help="Replace previous validation reports")
     validate.add_argument("--as-of", type=parse_reference_date, help="Reference date YYYY-MM-DD (default: local computer date)")
+    history = subparsers.add_parser("history", help="List stored documents without API calls")
+    history.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
+    history.add_argument("--limit", type=int, default=20)
+    history.add_argument("--json", action="store_true", help="Print machine-readable history")
+    show = subparsers.add_parser("show", help="Show one stored document and its attempts")
+    show.add_argument("document_id", type=int)
+    show.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     args = parser.parse_args(argv)
+    if args.command in {"history", "show"}:
+        return run_history(args)
     if args.command == "validate":
         return run_saved_validation(args)
     try:
