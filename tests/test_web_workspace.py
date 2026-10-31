@@ -96,7 +96,7 @@ class WebWorkspaceTests(unittest.TestCase):
 
     def test_index_assets_and_real_document_summary(self):
         index = self.client.get("/")
-        self.assertIn("Invoice workspace", index.text)
+        self.assertIn("AI Document Automation", index.text)
         self.assertIn("httponly", index.headers["set-cookie"].lower())
         self.assertIn("default-src 'self'", index.headers["content-security-policy"])
         self.assertEqual(self.client.get("/static/app.js").status_code, 200)
@@ -417,7 +417,7 @@ class WorkspaceOperationTests(unittest.TestCase):
         endpoints = {getattr(route, "path", ""): getattr(route, "endpoint", None) for route in app.routes}
         root = endpoints["/"]()
         self.assertIn("httponly", root.headers["set-cookie"].lower())
-        self.assertIn(b'Invoice workspace', root.body)
+        self.assertIn(b'AI Document Automation', root.body)
         self.assertEqual(endpoints["/api/documents"](q="", status="all", page=1)["counts"]["total"], 4)
         self.assertTrue(endpoints["/api/documents/{document_id}/pdf"](1).body.startswith(b"%PDF-"))
         document = app.state.workspace.document(1)

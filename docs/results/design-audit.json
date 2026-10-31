@@ -1,0 +1,135 @@
+{
+  "passed": true,
+  "errors": [],
+  "contrast_pairs": [
+    {
+      "foreground": "text",
+      "background": "canvas",
+      "ratio": 16.7046
+    },
+    {
+      "foreground": "text",
+      "background": "surface",
+      "ratio": 15.8579
+    },
+    {
+      "foreground": "text",
+      "background": "raised",
+      "ratio": 15.0237
+    },
+    {
+      "foreground": "secondary",
+      "background": "canvas",
+      "ratio": 8.0108
+    },
+    {
+      "foreground": "secondary",
+      "background": "surface",
+      "ratio": 7.6047
+    },
+    {
+      "foreground": "secondary",
+      "background": "raised",
+      "ratio": 7.2047
+    },
+    {
+      "foreground": "muted",
+      "background": "canvas",
+      "ratio": 5.0642
+    },
+    {
+      "foreground": "muted",
+      "background": "surface",
+      "ratio": 4.8075
+    },
+    {
+      "foreground": "muted",
+      "background": "raised",
+      "ratio": 4.5546
+    },
+    {
+      "foreground": "accent",
+      "background": "canvas",
+      "ratio": 5.9869
+    },
+    {
+      "foreground": "accent",
+      "background": "surface",
+      "ratio": 5.6834
+    },
+    {
+      "foreground": "accent",
+      "background": "raised",
+      "ratio": 5.3844
+    },
+    {
+      "foreground": "success",
+      "background": "canvas",
+      "ratio": 10.4325
+    },
+    {
+      "foreground": "success",
+      "background": "surface",
+      "ratio": 9.9038
+    },
+    {
+      "foreground": "success",
+      "background": "raised",
+      "ratio": 9.3827
+    },
+    {
+      "foreground": "warning",
+      "background": "canvas",
+      "ratio": 9.5885
+    },
+    {
+      "foreground": "warning",
+      "background": "surface",
+      "ratio": 9.1026
+    },
+    {
+      "foreground": "warning",
+      "background": "raised",
+      "ratio": 8.6237
+    },
+    {
+      "foreground": "error",
+      "background": "canvas",
+      "ratio": 7.0515
+    },
+    {
+      "foreground": "error",
+      "background": "surface",
+      "ratio": 6.6941
+    },
+    {
+      "foreground": "error",
+      "background": "raised",
+      "ratio": 6.342
+    }
+  ],
+  "minimum_text_ratio": 4.5546,
+  "primary_button_ratio": 5.9869,
+  "pages": {
+    "index.html": {
+      "unique_ids": 122,
+      "labelled_buttons": 38
+    },
+    "design-system.html": {
+      "unique_ids": 24,
+      "labelled_buttons": 8
+    }
+  },
+  "fonts": {
+    "InterVariable.woff2": {
+      "bytes": 352240,
+      "sha256": "693b77d4f32ee9b8bfc995589b5fad5e99adf2832738661f5402f9978429a8e3"
+    },
+    "JetBrainsMono-Regular.woff2": {
+      "bytes": 92380,
+      "sha256": "f1a7a03672cdd494ce0d5543fac6e4360fe22403c6de297fdc2e55a815f7baff"
+    }
+  },
+  "browser_geometry_verified": false,
+  "limits": "Static structure and computed color ratios only. Browser layout, keyboard focus and screen reader QA need a real browser."
+}

@@ -20,6 +20,14 @@ jobs:
       - name: Run tests in the test image
         run: docker compose --profile tools run --build --rm tests
 
+      - name: Check design tokens and accessible markup
+        run: docker compose --profile tools run --rm tests python -m tools.check_design
+
+      - name: Check UI interactions without a browser
+        run: |
+          npm install --ignore-scripts
+          npm run test:ui
+
       - name: Run the complete reference demonstration
         run: docker compose --profile tools up --build --abort-on-container-exit --exit-code-from report report
 

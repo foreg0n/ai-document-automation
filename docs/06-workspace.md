@@ -33,7 +33,7 @@ A completed duplicate reuses the existing record.
 
 ## What the interface includes
 
-- Document history with search and 25-record pages.
+- Document history with search and eight-record pages.
 - A human-review queue and a list of confirmed documents.
 - The original PDF and saved text for each page.
 - Five editable fields and stage 4 rule issues.

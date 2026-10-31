@@ -1,12 +1,7 @@
 # AI Document Automation
 
-A portfolio project built in eight small stages: invoice upload, text extraction,
-structured AI extraction, validation, human review, storage, and CSV export.
-
-**Current stage: 8 / 8 - Docker packaging, reproducible demo, and measured reports.**
-
-All eight stages are implemented. Local checks pass; container execution,
-browser visual QA, and a live provider accuracy run still need verification.
+A local workspace for uploading invoice PDFs, extracting structured data with
+AI, checking the source, and exporting reviewed results as CSV or JSON.
 
 ## Docker demo
 
@@ -21,7 +16,7 @@ model calls. Named volumes preserve results and reviews; demo and live state
 are separate. See [stage 8](docs/08-delivery.md) for live intake, tests, volumes,
 and the current container-verification limits.
 
-The stage 3 integration is implemented and tested with controlled API responses.
+The LLM integration is tested with controlled API responses.
 A live provider run still needs your API key and model ID; no real-model
 accuracy results are claimed.
 
@@ -46,6 +41,23 @@ For your own documents, run without `--demo` after configuring `.env`:
 The live workspace uses `data/documents.sqlite3`; new unique PDFs use the
 configured model, while duplicates reuse stored results. Use `--database` to
 choose another database, or `--port` if your chosen port is already in use.
+
+## Interface and design system
+
+The dark workspace has separate document, upload, review, and export screens.
+It uses Inter and JetBrains Mono served locally, a restrained indigo accent,
+visible keyboard focus, labelled statuses, and mobile bottom navigation.
+
+Open **http://127.0.0.1:8765/design-system** with the server running to inspect
+all 16 components and their eight states. The
+[design-system guide](docs/design-system.md) documents tokens, contrast,
+responsive behavior, and verification limits. Raw tokens are available in
+`document_automation/web_static/design-tokens.json`.
+
+The main flow is upload → source review → confirm and export. CSV and JSON
+downloads use the latest saved values; bulk downloads have a count-specific
+confirmation. Saving a review offers Undo for ten seconds. Production does not
+invent model confidence scores; source text matches are labelled as matches.
 
 ## Quick start (Windows / PowerShell)
 
@@ -109,7 +121,7 @@ Existing output is preserved unless `--overwrite` is supplied.
 When processing different input folders with matching filenames, use different
 output directories to keep their results separate.
 
-## Stage 3: extract invoice fields with an LLM
+## Extract invoice fields with an LLM
 
 The new `process` command reads a PDF and sends its page texts to a configured
 Chat Completions API. It never reads the ground truth files.
@@ -197,7 +209,7 @@ The `.env` file, generated outputs, and the virtual environment are ignored by G
 The simple `.env` reader accepts `KEY=value`, matching single/double quotes, and
 full-line comments. It does not support `export`, interpolation, or inline comments.
 
-## Stage 4: deterministic validation
+## Deterministic validation
 
 `process` now automatically checks parsed invoice fields and preserves the
 original values. A report has status `passed` or `needs_review`, a reference
@@ -250,7 +262,7 @@ This creates five reports in `output/validation-demo/`, marked
 needs review. The duplicate passes these field rules because duplicate detection
 belongs to stage 5. This demonstration does not run or evaluate a model.
 
-## Stage 5: SQLite and duplicates
+## SQLite and duplicates
 
 Live `process` runs use `data/documents.sqlite3` by default. Change this with
 `--database PATH`. The database contains extracted page text, the five fields,
@@ -316,7 +328,7 @@ answers explicitly, makes no model calls, and marks its database as
 `llm` database; this keeps fixture answers out of the real result cache.
 Database files and temporary test directories are ignored by Git.
 
-## Stage 6: upload, human review, and CSV
+## Upload, human review, and export
 
 The browser workspace includes drag-and-drop or file selection, a searchable
 and paginated document history, rule issues, extracted page text, a PDF preview,
@@ -367,7 +379,7 @@ IDs were checked. Chrome/Edge could not launch successfully for screenshot QA,
 so full HTTP/browser and visual verification remain to be run on an unrestricted
 desktop. The HTTP tests stay enabled automatically where local TCP works.
 
-## Stage 7: automatic incoming-folder intake
+## Automatic incoming-folder intake
 
 After configuring `.env`, keep this command running and copy PDFs into
 `data/incoming/`:
@@ -416,7 +428,7 @@ transactionally while preserving documents, attempts, and manual reviews;
 read-only commands still support older databases. See the English
 [stage 7 walkthrough](docs/07-folder-intake.md) for options and recovery details.
 
-## Stage 8: reproducible project demonstration
+## Reproducible project demonstration
 
 Run the complete reference workflow locally:
 
@@ -505,7 +517,20 @@ arrival, persistent receipts, retries, deduplication, export recovery, pending
 inputs, and v2-to-v3 migration with existing reviews preserved.
 No tests call an external LLM. They do not measure a real model's accuracy.
 
-## Run stage 1
+For UI interaction checks, Node 22+ is a development-only dependency:
+
+```powershell
+npm install --ignore-scripts
+npm run test:ui
+.\.venv\Scripts\python.exe -m tools.check_design
+```
+
+The UI is plain HTML/CSS/JavaScript with no build step. DOM checks exercise
+review, Undo, upload, JSON selection, bulk confirmation, and failure recovery.
+The design checker measures contrast and validates structural accessibility;
+it does not claim browser geometry or visual verification.
+
+## Recreate the synthetic samples
 
 The five synthetic PDFs and their reference files are already included.
 To recreate them intentionally:
@@ -548,6 +573,7 @@ documents.
 | `tests/test_web_workspace.py` | Workspace operations, migration and HTTP checks |
 | `tests/test_intake.py` | Folder intake, recovery, CLI and schema v3 checks |
 | `tests/test_delivery.py` | Complete demo, saved-result evaluation and container server settings |
+| `tests/test_design_workspace.py`, `tests/ui.test.mjs` | Export scope, real progress stages and UI interactions |
 | `.env.example` | Configuration template without credentials |
 | `output/text/` | Generated extraction results; ignored by Git |
 | `output/invoices/` | Stage 3 previews or invoice fields and metadata; ignored by Git |
@@ -567,6 +593,7 @@ documents.
 | `tools/demo_intake.py` | Offline folder-intake demonstration with an isolated fixture database |
 | `tools/demo_project.py` | Reproducible workflow with measured reports and CSV artifacts |
 | `tools/evaluate_results.py` | Offline exact-match scoring of original saved LLM fields |
+| `tools/check_design.py` | Computed contrast and static accessibility/asset checks |
 | `docs/01-sample-data.md` | English stage 1 walkthrough |
 | `docs/02-text-extraction.md` | English stage 2 walkthrough and function explanations |
 | `docs/03-llm-extraction.md` | English stage 3 setup and function explanations |
@@ -576,6 +603,7 @@ documents.
 | `docs/07-folder-intake.md` | English automatic intake and recovery walkthrough |
 | `docs/08-delivery.md` | English Docker, demonstration, evaluation and function walkthrough |
 | `docs/portfolio-results.md` | Observed reference-run results with verification limits |
+| `docs/design-system.md` | Product tokens, components, screens and accessibility rules |
 
 ## Dataset
 
@@ -595,17 +623,6 @@ total cannot be reconstructed from subtotals.
 Reference answers belong only in evaluation code. The stage 2 reader never reads
 the ground truth files. Do not send the JSON or CSV reference file to an
 extraction model.
-
-## Roadmap
-
-1. Synthetic PDFs and reference answers - complete.
-2. CLI for extracting text from text-based PDFs - complete.
-3. LLM extraction into the five-field JSON format - implemented; live provider verification pending configuration.
-4. Deterministic validation with clear review reasons - complete.
-5. SQLite persistence and file-content duplicate detection - complete.
-6. Upload, review and history UI with CSV export - implemented; HTTP/browser QA limited by execution environment.
-7. Automatic intake from an incoming folder - complete; controlled/offline verification, live provider run pending configuration.
-8. Docker, reproducible demo and measured portfolio results - implemented; local reference report verified, container build/run pending a working engine.
 
 Five synthetic samples are a development smoke-test set, not evidence of
 real-world extraction accuracy. Larger, more varied data will be needed later.

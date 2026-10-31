@@ -81,9 +81,10 @@ class Workspace:
             if needle and needle not in (row["source_file"] + " " + " ".join(str(v or "") for v in (row["fields"] or {}).values())).casefold():
                 continue
             filtered.append(row)
-        start = (page - 1) * 25
-        return {"items": filtered[start:start + 25], "total": len(filtered), "page": page,
-                "page_size": 25, "counts": counts, "demo": self.demo}
+        page_size = 8
+        start = (page - 1) * page_size
+        return {"items": filtered[start:start + page_size], "total": len(filtered), "page": page,
+                "page_size": page_size, "counts": counts, "demo": self.demo}
 
     def document(self, document_id):
         with self.store(readonly=True) as store:
@@ -126,17 +127,40 @@ class Workspace:
                               note=note.strip(), expected_revision=revision)
         return self.document(document_id)
 
-    def export_csv(self, scope="confirmed"):
+    def export_rows(self, scope="confirmed", document_id=None):
+        if scope not in {"confirmed", "all"}:
+            raise ValueError("Choose confirmed documents or all completed documents.")
         with self.store(readonly=True) as store:
+            if document_id is not None:
+                store.get(document_id)  # A missing selection must not silently export nothing.
             rows = store.review_rows()
+        return [row for row in reversed(rows) if row["state"] == "completed"
+                and (scope == "all" or row["review_status"] == "confirmed")
+                and (document_id is None or row["id"] == document_id)]
+
+    def export_preview(self, scope="confirmed", document_id=None):
+        rows = self.export_rows(scope, document_id)
+        return {"count": len(rows), "unreviewed": sum(row["review_status"] != "confirmed" for row in rows),
+                "scope": scope, "samples": [{"document_id": row["id"], "source_file": row["source_file"],
+                "fields": row["fields"], "review_status": row["review_status"]} for row in rows[:5]]}
+
+    def export_json(self, scope="confirmed", document_id=None):
+        rows = self.export_rows(scope, document_id)
+        records = [{"document_id": row["id"], "source_file": row["source_file"],
+                    "fields": row["fields"], "validation_status": row["validation"]["status"],
+                    "review_status": row["review_status"], "input_kind": row["input_kind"],
+                    "review_note": row["note"] or ""} for row in rows]
+        return (json.dumps({"schema_version": 1, "documents": records}, ensure_ascii=False,
+                           indent=2, allow_nan=False) + "\n").encode("utf-8")
+
+    def export_csv(self, scope="confirmed", document_id=None):
+        rows = self.export_rows(scope, document_id)
         columns = ["document_id", "source_file", *FIELD_DESCRIPTIONS,
                    "validation_status", "review_status", "input_kind", "review_note"]
         output = io.StringIO(newline="")
         writer = csv.DictWriter(output, fieldnames=columns)
         writer.writeheader()
-        for row in reversed(rows):
-            if row["state"] != "completed" or (scope == "confirmed" and row["review_status"] != "confirmed"):
-                continue
+        for row in rows:
             values = {"document_id": row["id"], "source_file": row["source_file"], **row["fields"],
                       "validation_status": row["validation"]["status"], "review_status": row["review_status"],
                       "input_kind": row["input_kind"], "review_note": row["note"] or ""}
@@ -196,20 +220,26 @@ class Workspace:
             return dict(self.jobs[job_id])
 
     def _process_job(self, job_id, source, digest):
+        def stage(value):
+            with self.lock:
+                self.jobs[job_id]["stage"] = value
+
         with self.lock:
             self.jobs[job_id]["state"] = "processing"
+            self.jobs[job_id]["stage"] = "reading"
         try:
             with self.store() as store:
                 if self.demo:
+                    stage("reusing")
                     claim = store.claim(digest, source)
                     store.set_export_status(claim, "skipped")
                     document_id, duplicate = claim.document_id, True
                 else:
                     result = process_pdf(source, None, self.exports / digest, store=store,
                                          settings_loader=lambda: load_settings(self.env_file),
-                                         reference_date=self.today())
+                                         reference_date=self.today(), on_stage=stage)
                     document_id, duplicate = result.document_id, result.duplicate
-            update = {"state": "completed", "document_id": document_id, "duplicate": duplicate}
+            update = {"state": "completed", "stage": "ready", "document_id": document_id, "duplicate": duplicate}
         except (ConfigurationError, APIError, StorageError, InvoiceFormatError, ValueError, OSError) as exc:
             update = {"state": "failed", "error": str(exc)}
         except Exception as exc:

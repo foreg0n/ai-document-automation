@@ -1,0 +1,8 @@
+{
+  "name": "ai-document-automation-ui-checks",
+  "private": true,
+  "type": "module",
+  "scripts": {"test:ui": "node --test tests/ui.test.mjs"},
+  "devDependencies": {"linkedom": "0.18.14"},
+  "engines": {"node": ">=22"}
+}

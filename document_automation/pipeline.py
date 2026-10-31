@@ -61,6 +61,7 @@ def process_pdf(
     dry_run: bool = False, overwrite: bool = False, reference_date: date | None = None,
     store: DocumentStore | None = None,
     settings_loader: Callable[[], LLMSettings] | None = None,
+    on_stage: Callable[[str], None] | None = None,
 ) -> ProcessResult:
     """Reuse completed hashes before loading credentials or calling the model."""
     if dry_run:
@@ -86,6 +87,8 @@ def process_pdf(
                          ("fields.json", "meta.json", "validation.json"))
     try:
         if claim.duplicate:
+            if on_stage is not None:
+                on_stage("reusing")
             stored = store.get(claim.document_id)
             fields, metadata = stored["fields"], stored["metadata"]
             validation_data = stored["validation"]
@@ -100,9 +103,15 @@ def process_pdf(
             if active_settings is None or not active_settings.api_key:
                 raise ValueError("LLM settings and an API key are required for new documents.")
             _check_outputs(destinations, overwrite)
+            if on_stage is not None:
+                on_stage("reading")
             document = extract_pdf_text(source, content=content)
+            if on_stage is not None:
+                on_stage("extracting")
             result = request_invoice(build_request(document, active_settings), active_settings)
             fields, warnings = result.fields, document.warnings
+            if on_stage is not None:
+                on_stage("validating")
             report = validate_invoice(fields, reference_date=reference_date or date.today(),
                                       extraction_warnings=warnings)
             validation_data = report.to_dict()

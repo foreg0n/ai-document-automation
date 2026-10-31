@@ -1,0 +1,132 @@
+{
+  "name": "AI Document Automation",
+  "version": "1.0.0",
+  "color": {
+    "canvas": "#0B0C0E",
+    "surface": "#121316",
+    "raised": "#17191D",
+    "border": "#24272D",
+    "text": "#ECEDEF",
+    "secondary": "#A1A6B0",
+    "muted": "#7C828D",
+    "controlBorder": "#666D7A",
+    "accent": "#8B7CFF",
+    "accentHover": "#9D91FF",
+    "success": "#3DD68C",
+    "warning": "#F5A524",
+    "error": "#FF6B6B"
+  },
+  "font": {
+    "interface": "Inter",
+    "data": "JetBrains Mono",
+    "sizes": [
+      12,
+      14,
+      16,
+      20,
+      28,
+      40
+    ],
+    "weights": [
+      400,
+      500,
+      600
+    ],
+    "bodyLineHeight": 1.5,
+    "maxMeasure": "70ch",
+    "hosting": "self-hosted; SIL Open Font License 1.1"
+  },
+  "space": [
+    4,
+    8,
+    12,
+    16,
+    20,
+    24,
+    32,
+    40,
+    48,
+    64
+  ],
+  "radius": {
+    "control": 8,
+    "panel": 12
+  },
+  "shadow": "none",
+  "motion": {
+    "fast": 150,
+    "normal": 200,
+    "max": 250,
+    "easing": "ease-out",
+    "reducedMotion": "instant"
+  },
+  "layout": {
+    "sidebar": 232,
+    "wide": 1440,
+    "tablet": 1000,
+    "mobile": 760,
+    "minimumWidth": 320,
+    "listPageSize": 8
+  },
+  "interaction": {
+    "minimumTarget": 44,
+    "primaryHeight": 48,
+    "focus": {
+      "width": 2,
+      "color": "#8B7CFF",
+      "offset": 3
+    },
+    "toastUndoMilliseconds": 10000,
+    "navigationItems": 3
+  },
+  "states": [
+    "default",
+    "hover",
+    "focus-visible",
+    "pressed",
+    "disabled",
+    "loading",
+    "error",
+    "success"
+  ],
+  "components": [
+    "Button",
+    "Input",
+    "Select",
+    "Checkbox",
+    "Switch",
+    "Tabs",
+    "Table",
+    "Card",
+    "Badge / Status",
+    "Dropzone",
+    "Progress",
+    "Toast",
+    "Modal",
+    "Tooltip",
+    "Sidebar",
+    "Empty state"
+  ],
+  "confidence": {
+    "production": "not_provided",
+    "exampleValues": [
+      0.98,
+      0.61
+    ],
+    "examplesOnly": true,
+    "rule": "Never derive a model confidence percentage from a format check or a text match."
+  },
+  "sourceHighlight": {
+    "kind": "first literal text match",
+    "pdfBoundingBoxes": false
+  },
+  "support": {
+    "production": "Text-based invoice PDFs, CSV and JSON downloads",
+    "notImplemented": [
+      "OCR",
+      "contract extraction",
+      "external push integrations",
+      "document deletion"
+    ]
+  }
+}

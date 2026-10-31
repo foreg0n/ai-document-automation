@@ -2,6 +2,7 @@
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
@@ -43,7 +44,7 @@ def create_app(database: Path, *, demo=False, uploads=Path("data/uploads"),
         response = await call_next(request)
         response.headers["Cache-Control"] = "no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-src 'self'; frame-ancestors 'self'; base-uri 'self'"
+        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-src 'self' blob:; frame-ancestors 'self'; base-uri 'self'"
         return response
 
     @app.exception_handler(StarletteHTTPException)
@@ -102,11 +103,24 @@ def create_app(database: Path, *, demo=False, uploads=Path("data/uploads"),
         return workspace.save_review(document_id, await request.json())
 
     @app.get("/api/export.csv")
-    def export(scope: str = "confirmed"):
+    def export(scope: str = "confirmed", document_id: Annotated[int | None, Query(ge=1)] = None):
         if scope not in {"confirmed", "all"}:
             raise HTTPException(400, "Choose confirmed or all results.")
-        return Response(workspace.export_csv(scope), media_type="text/csv; charset=utf-8",
+        return Response(workspace.export_csv(scope, document_id), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": 'attachment; filename="invoice-results.csv"'})
+
+    @app.get("/api/export.json")
+    def export_json(scope: str = "confirmed", document_id: Annotated[int | None, Query(ge=1)] = None):
+        return Response(workspace.export_json(scope, document_id), media_type="application/json",
+                        headers={"Content-Disposition": 'attachment; filename="invoice-results.json"'})
+
+    @app.get("/api/export/preview")
+    def export_preview(scope: str = "confirmed", document_id: Annotated[int | None, Query(ge=1)] = None):
+        return workspace.export_preview(scope, document_id)
+
+    @app.get("/design-system", response_class=HTMLResponse)
+    def design_system():
+        return HTMLResponse((ASSETS / "design-system.html").read_text(encoding="utf-8"))
 
     @app.post("/api/uploads", status_code=202)
     async def upload(request: Request, filename: str = Query(..., max_length=250)):
